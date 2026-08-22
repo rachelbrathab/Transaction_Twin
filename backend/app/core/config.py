@@ -38,6 +38,10 @@ class Settings(BaseSettings):
 
     # LLM (future — placeholder only)
     llm_api_key: str = ""
+    llm_provider: str = "gemini"
+
+    # Gemini
+    gemini_api_key: str = ""
 
     @property
     def is_development(self) -> bool:
