@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.database import Base
 
 # Import all models so Alembic can detect them for autogeneration.
-# Future model modules should be imported here.
+import app.models  # noqa: F401  — triggers model registration with Base.metadata
 
 config = context.config
 settings = get_settings()
