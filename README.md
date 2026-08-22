@@ -55,7 +55,6 @@ Razorpay Integration   — Test mode payment processing
 ### 1. Start PostgreSQL
 
 ```bash
-cd transaction-twin
 docker compose up -d
 ```
 
