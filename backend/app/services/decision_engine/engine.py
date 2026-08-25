@@ -157,6 +157,18 @@ class DecisionEngine:
             elif sig.status in ("negative", "unknown"):
                 has_review = True
 
+        # ── Step 3.5: Risk signals (when available) ───────
+        if context.risk_result is not None:
+            from app.services.decision_engine.risk_adapter import RiskAdapter
+            risk_adapter = RiskAdapter()
+            risk_signals = risk_adapter.to_signals(context.risk_result)
+            for sig in risk_signals:
+                signals.append(sig)
+                if sig.status == "violation":
+                    has_block = True
+                elif sig.status in ("negative", "unknown"):
+                    has_review = True
+
         # ── Step 4: Agent trust ───────────────────────────
         agent_signal = self._evaluate_agent_trust(context)
         if agent_signal is not None:

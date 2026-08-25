@@ -6,6 +6,8 @@ Does NOT call LLMs.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +21,7 @@ from app.models.audit_event import AuditEvent
 from app.models.decision import Decision
 from app.models.intent import Intent
 from app.models.policy import Policy
+from app.models.transaction import Transaction
 from app.schemas.decision_engine import (
     DecisionRequest,
     DecisionResponse,
@@ -34,9 +37,83 @@ from app.services.decision_engine.models import DecisionContext
 from app.services.intent_engine.models import StructuredIntent
 from app.services.policy_engine.evaluator import PolicyEvaluator
 from app.services.policy_engine.models import EvaluationContext
+from app.services.risk_engine.engine import RiskEngine
+from app.services.risk_engine.models import RiskContext, VelocityContext
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+# Maximum time window for velocity queries (1 week)
+VELOCITY_WINDOW_WEEKS = 1
+VELOCITY_MAX_ROWS = 500
+
+
+async def _build_velocity_context(
+    db: AsyncSession,
+    agent_id: uuid.UUID,
+) -> VelocityContext:
+    """Pre-compute velocity features with a single bounded query."""
+    now = datetime.now(UTC)
+    one_week_ago = now - timedelta(weeks=VELOCITY_WINDOW_WEEKS)
+
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.agent_id == agent_id)
+        .where(Transaction.created_at >= one_week_ago)
+        .order_by(Transaction.created_at.desc())
+        .limit(VELOCITY_MAX_ROWS)
+    )
+    recent = result.scalars().all()
+
+    if not recent:
+        return VelocityContext(history_available=False)
+
+    one_hour_ago = now - timedelta(hours=1)
+    one_day_ago = now - timedelta(days=1)
+
+    hour_txns = [t for t in recent if t.created_at >= one_hour_ago]
+    day_txns = [t for t in recent if t.created_at >= one_day_ago]
+
+    hour_amounts = [Decimal(str(t.amount)) for t in hour_txns]
+    day_amounts = [Decimal(str(t.amount)) for t in day_txns]
+
+    day_merchants = {t.merchant_id for t in day_txns if t.merchant_id}
+    hour_merchant_counts: dict[uuid.UUID, int] = {}
+    hour_type_counts: dict[str, int] = {}
+    for t in hour_txns:
+        if t.merchant_id:
+            hour_merchant_counts[t.merchant_id] = (
+                hour_merchant_counts.get(t.merchant_id, 0) + 1
+            )
+        hour_type_counts[t.transaction_type] = (
+            hour_type_counts.get(t.transaction_type, 0) + 1
+        )
+
+    return VelocityContext(
+        transactions_last_hour=len(hour_txns),
+        transactions_last_day=len(day_txns),
+        transactions_last_week=len(recent),
+        total_amount_last_hour=(
+            sum(hour_amounts) if hour_amounts else None
+        ),
+        total_amount_last_day=(
+            sum(day_amounts) if day_amounts else None
+        ),
+        average_amount_last_day=(
+            Decimal(str(sum(day_amounts) / len(day_amounts)))
+            if day_amounts
+            else None
+        ),
+        same_merchant_count_last_hour=(
+            max(hour_merchant_counts.values()) if hour_merchant_counts else 0
+        ),
+        same_type_count_last_hour=(
+            max(hour_type_counts.values()) if hour_type_counts else 0
+        ),
+        unique_merchants_last_day=len(day_merchants),
+        history_available=True,
+    )
 
 
 @router.post("/transactions/decide", response_model=DecisionResponse)
@@ -262,7 +339,64 @@ async def _decide_transaction_impl(
         agent_model and agent_model.trust_score is not None
     ) else None
 
-    # 9. Build DecisionContext
+    # 9. Build VelocityContext (single bounded query)
+    velocity_context = await _build_velocity_context(db, agent_uuid)
+
+    # 10. Build RiskContext and run Risk Engine
+    # Find amount deviation from drift field comparisons
+    amount_deviation_for_risk = None
+    for fc in drift_result.field_comparisons:
+        if (
+            fc.field == "amount"
+            and fc.drift is not None
+            and fc.drift.deviation_percent is not None
+        ):
+            amount_deviation_for_risk = fc.drift.deviation_percent
+            break
+
+    risk_context = RiskContext(
+        user_id=proposal.user_id,
+        agent_id=proposal.agent_id,
+        intent_id=str(intent_model.id),
+        intent_version=intent_model.version,
+        intent_confidence=(
+            float(intent_model.confidence) if intent_model.confidence else None
+        ),
+        intent_transaction_type=structured_intent.transaction_type.value,
+        intent_amount_max=structured_intent.amount.max,
+        intent_amount_min=structured_intent.amount.min,
+        intent_currency=structured_intent.currency.code,
+        intent_merchant_trust_required=(
+            structured_intent.merchant_constraints.trust_required
+        ),
+        intent_country=structured_intent.geographic_constraints.country,
+        proposal_amount=proposal.amount,
+        proposal_currency=proposal.currency,
+        proposal_transaction_type=proposal.transaction_type.value,
+        proposal_merchant_name=proposal.merchant_name,
+        proposal_merchant_trusted=proposal.merchant_trusted,
+        proposal_country=proposal.country,
+        drift_available=True,
+        drift_overall_status=drift_result.overall_status.value,
+        drift_severity=drift_result.drift_severity.value,
+        drift_amount_deviation_percent=amount_deviation_for_risk,
+        policy_available=True,
+        policy_triggered_count=policy_result.triggered_count,
+        policy_unknown_count=policy_result.unknown_count,
+        policy_invalid_count=policy_result.invalid_count,
+        policy_highest_severity=(
+            policy_result.highest_severity.value
+            if policy_result.highest_severity
+            else None
+        ),
+        agent_trust_score=agent_trust_score,
+        velocity=velocity_context,
+    )
+
+    risk_engine = RiskEngine()
+    risk_result = risk_engine.evaluate(risk_context)
+
+    # 11. Build DecisionContext
     # Serialize policy results for the Decision Engine
     policy_results_for_signals = []
     for pr in policy_result.policy_results:
@@ -310,13 +444,14 @@ async def _decide_transaction_impl(
             else None
         ),
         policy_results_for_signals=policy_results_for_signals,
+        risk_result=risk_result,
     )
 
-    # 10. Run Decision Engine
+    # 12. Run Decision Engine
     decision_engine = DecisionEngine()
     decision_result = decision_engine.evaluate(decision_context)
 
-    # 11. Persist Decision
+    # 13. Persist Decision
     # Find the most-severe triggered policy for policy_id FK
     most_severe_policy_id = None
     for pr_dict in policy_results_for_signals:
@@ -356,7 +491,7 @@ async def _decide_transaction_impl(
     db.add(db_decision)
     await db.flush()
 
-    # 12. Create AuditEvent
+    # 14. Create AuditEvent
     audit_event = AuditEvent(
         entity_type="decision",
         entity_id=db_decision.id,
@@ -379,13 +514,13 @@ async def _decide_transaction_impl(
                 if decision_result.drift_summary
                 else None
             ),
-            "risk_available": False,
+            "risk_available": True,
         },
     )
     db.add(audit_event)
     await db.flush()
 
-    # 13. Build response
+    # 15. Build response
     return DecisionResponse(
         decision=decision_result.decision.value,
         reason=decision_result.reason,
@@ -415,12 +550,10 @@ async def _decide_transaction_impl(
         ),
         risk_summary=(
             RiskSummaryResponse(
-                overall_score=decision_result.risk_summary.overall_score,
-                risk_level=decision_result.risk_summary.risk_level,
-                available=decision_result.risk_summary.available,
+                overall_score=risk_result.overall_score,
+                risk_level=risk_result.risk_level.value,
+                available=True,
             )
-            if decision_result.risk_summary
-            else None
         ),
         drift_summary=(
             DriftSummaryResponse(

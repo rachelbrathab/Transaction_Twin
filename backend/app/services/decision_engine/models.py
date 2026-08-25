@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.services.risk_engine.models import RiskResult
+
 # ── Enums ──────────────────────────────────────────────────────────
 
 
@@ -171,8 +173,8 @@ class DecisionContext(BaseModel):
         description="Raw policy results for building DecisionSignals",
     )
 
-    # ── Risk Engine (future — Sprint 7) ───────────────────
-    risk_result: RiskSignal | None = None
+    # ── Risk Engine (Sprint 7) ──────────────────────────
+    risk_result: RiskResult | None = None
 
     # ── Metadata ──────────────────────────────────────────
     evaluation_id: str = ""
