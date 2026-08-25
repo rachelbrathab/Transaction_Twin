@@ -37,6 +37,8 @@ from app.services.decision_engine.models import DecisionContext
 from app.services.intent_engine.models import StructuredIntent
 from app.services.policy_engine.evaluator import PolicyEvaluator
 from app.services.policy_engine.models import EvaluationContext
+from app.services.reputation_engine.engine import ReputationEngine
+from app.services.reputation_engine.models import BehavioralContext
 from app.services.risk_engine.engine import RiskEngine
 from app.services.risk_engine.models import RiskContext, VelocityContext
 
@@ -47,6 +49,12 @@ router = APIRouter()
 # Maximum time window for velocity queries (1 week)
 VELOCITY_WINDOW_WEEKS = 1
 VELOCITY_MAX_ROWS = 500
+
+# Reputation snapshot cache: recompute at most once per hour
+REPUTATION_CACHE_SECONDS = 3600
+# History window for reputation computation (90 days)
+REPUTATION_WINDOW_DAYS = 90
+REPUTATION_MAX_ROWS = 1000
 
 
 async def _build_velocity_context(
@@ -113,6 +121,182 @@ async def _build_velocity_context(
         ),
         unique_merchants_last_day=len(day_merchants),
         history_available=True,
+    )
+
+
+async def _build_behavioral_context(
+    db: AsyncSession,
+    agent_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> BehavioralContext:
+    """Build BehavioralContext for reputation computation.
+
+    Uses bounded queries with a 90-day window and 1000-row limit.
+    Extracts decision outcomes, policy violations, drift events,
+    amount patterns, merchant diversity, and risk history.
+    """
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=REPUTATION_WINDOW_DAYS)
+    recent_window = now - timedelta(days=30)
+
+    # Single bounded query for transaction history
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.agent_id == agent_id)
+        .where(Transaction.created_at >= window_start)
+        .order_by(Transaction.created_at.desc())
+        .limit(REPUTATION_MAX_ROWS)
+    )
+    transactions = result.scalars().all()
+
+    if not transactions:
+        return BehavioralContext(
+            agent_id=str(agent_id),
+            user_id=str(user_id),
+            history_available=False,
+            decision_history_available=False,
+            risk_history_available=False,
+        )
+
+    # Transaction counts
+    total = len(transactions)
+    one_hour_ago = now - timedelta(hours=1)
+    one_day_ago = now - timedelta(days=1)
+    one_week_ago = now - timedelta(weeks=1)
+    one_month_ago = now - timedelta(days=30)
+
+    txns_last_hour = sum(1 for t in transactions if t.created_at >= one_hour_ago)
+    txns_last_day = sum(1 for t in transactions if t.created_at >= one_day_ago)
+    txns_last_week = sum(1 for t in transactions if t.created_at >= one_week_ago)
+    txns_last_month = sum(1 for t in transactions if t.created_at >= one_month_ago)
+
+    # Amount patterns
+    amounts = [float(t.amount) for t in transactions if t.amount is not None]
+    avg_amount = sum(amounts) / len(amounts) if amounts else None
+    max_amount = max(amounts) if amounts else None
+    amount_stddev = None
+    if avg_amount is not None and len(amounts) >= 2:
+        variance = sum((a - avg_amount) ** 2 for a in amounts) / len(amounts)
+        amount_stddev = variance ** 0.5
+
+    # Merchant diversity
+    all_merchants = {t.merchant_id for t in transactions if t.merchant_id}
+    week_merchants = {
+        t.merchant_id for t in transactions
+        if t.merchant_id and t.created_at >= one_week_ago
+    }
+
+    # Temporal patterns
+    first_txn = min(t.created_at for t in transactions)
+    last_txn = max(t.created_at for t in transactions)
+    account_age_days = max(0, (now - first_txn).days)
+
+    # Load decisions for this agent (bounded)
+    from app.models.decision import Decision
+    decision_result = await db.execute(
+        select(Decision)
+        .join(Transaction, Decision.transaction_id == Transaction.id)
+        .where(Transaction.agent_id == agent_id)
+        .where(Decision.created_at >= window_start)
+        .order_by(Decision.created_at.desc())
+        .limit(REPUTATION_MAX_ROWS)
+    )
+    decisions = decision_result.scalars().all()
+
+    # Decision outcomes
+    total_decisions = len(decisions)
+    allow_count = sum(1 for d in decisions if d.decision == "allow")
+    review_count = sum(1 for d in decisions if d.decision == "review")
+    block_count = sum(1 for d in decisions if d.decision == "block")
+
+    recent_decisions = [d for d in decisions if d.created_at >= recent_window]
+    recent_allow = sum(1 for d in recent_decisions if d.decision == "allow")
+    recent_review = sum(1 for d in recent_decisions if d.decision == "review")
+    recent_block = sum(1 for d in recent_decisions if d.decision == "block")
+
+    # Extract policy violations from Decision.explanation JSONB
+    total_policy_violations = 0
+    recent_policy_violations = 0
+    critical_violations = 0
+    high_violations = 0
+    total_drift_events = 0
+    critical_drift_count = 0
+    high_drift_count = 0
+
+    for d in decisions:
+        explanation = d.explanation or {}
+        policy_statuses = explanation.get("policy_statuses", {})
+        for _pid, status in policy_statuses.items():
+            if status == "triggered":
+                total_policy_violations += 1
+                if d.created_at >= recent_window:
+                    recent_policy_violations += 1
+        # Check drift from explanation
+        drift_info = explanation.get("drift", {})
+        drift_severity = drift_info.get("severity")
+        if drift_severity and drift_severity in ("medium", "high", "critical"):
+            total_drift_events += 1
+            if drift_severity == "critical":
+                critical_drift_count += 1
+            elif drift_severity == "high":
+                high_drift_count += 1
+
+    # Load risk assessments for this agent (bounded)
+    from app.models.risk_assessment import RiskAssessment
+    risk_result_q = await db.execute(
+        select(RiskAssessment)
+        .join(Transaction, RiskAssessment.transaction_id == Transaction.id)
+        .where(Transaction.agent_id == agent_id)
+        .where(RiskAssessment.created_at >= window_start)
+        .order_by(RiskAssessment.created_at.desc())
+        .limit(REPUTATION_MAX_ROWS)
+    )
+    risk_assessments = risk_result_q.scalars().all()
+
+    risk_scores = [
+        ra.overall_score for ra in risk_assessments
+        if ra.overall_score is not None
+    ]
+    avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else None
+    max_risk = max(risk_scores) if risk_scores else None
+    critical_risk = sum(1 for s in risk_scores if s >= 0.75)
+
+    return BehavioralContext(
+        agent_id=str(agent_id),
+        user_id=str(user_id),
+        total_transactions=total,
+        transactions_last_hour=txns_last_hour,
+        transactions_last_day=txns_last_day,
+        transactions_last_week=txns_last_week,
+        transactions_last_month=txns_last_month,
+        total_decisions=total_decisions,
+        allow_count=allow_count,
+        review_count=review_count,
+        block_count=block_count,
+        recent_allow_count=recent_allow,
+        recent_review_count=recent_review,
+        recent_block_count=recent_block,
+        total_policy_violations=total_policy_violations,
+        recent_policy_violations=recent_policy_violations,
+        critical_violations=critical_violations,
+        high_violations=high_violations,
+        total_drift_events=total_drift_events,
+        critical_drift_count=critical_drift_count,
+        high_drift_count=high_drift_count,
+        average_transaction_amount=avg_amount,
+        max_transaction_amount=max_amount,
+        amount_stddev=amount_stddev,
+        unique_merchants_all_time=len(all_merchants),
+        unique_merchants_last_week=len(week_merchants),
+        first_transaction_at=first_txn.isoformat(),
+        last_transaction_at=last_txn.isoformat(),
+        account_age_days=account_age_days,
+        average_risk_score=avg_risk,
+        max_risk_score=max_risk,
+        critical_risk_count=critical_risk,
+        history_available=True,
+        decision_history_available=total_decisions > 0,
+        risk_history_available=len(risk_assessments) > 0,
     )
 
 
@@ -342,6 +526,51 @@ async def _decide_transaction_impl(
     # 9. Build VelocityContext (single bounded query)
     velocity_context = await _build_velocity_context(db, agent_uuid)
 
+    # 9.5. Compute Agent Reputation (Sprint 8)
+    agent_reputation_score: float | None = None
+    agent_reputation_level: str | None = None
+    reputation_available = False
+
+    if agent_model is not None:
+        # Check if cached reputation is recent enough
+        previous_snapshot = agent_model.reputation_snapshot
+        snapshot_is_fresh = False
+        if previous_snapshot and isinstance(previous_snapshot, dict):
+            evaluated_at_str = previous_snapshot.get("evaluated_at", "")
+            if evaluated_at_str:
+                try:
+                    evaluated_at = datetime.fromisoformat(evaluated_at_str)
+                    age_seconds = (datetime.now(UTC) - evaluated_at).total_seconds()
+                    snapshot_is_fresh = age_seconds < REPUTATION_CACHE_SECONDS
+                except (ValueError, TypeError):
+                    pass
+
+        if snapshot_is_fresh and previous_snapshot:
+            # Reuse cached reputation
+            agent_reputation_score = previous_snapshot.get("overall_score")
+            agent_reputation_level = previous_snapshot.get("trust_level")
+            reputation_available = agent_reputation_score is not None
+        else:
+            # Build BehavioralContext and compute new reputation
+            behavioral_context = await _build_behavioral_context(
+                db=db,
+                agent_id=agent_uuid,
+                user_id=user_uuid,
+            )
+
+            reputation_engine = ReputationEngine()
+            reputation_result = reputation_engine.evaluate(
+                behavioral_context, previous_snapshot
+            )
+
+            agent_reputation_score = reputation_result.overall_score
+            agent_reputation_level = reputation_result.trust_level.value
+            reputation_available = True
+
+            # Persist reputation snapshot to Agent
+            agent_model.reputation_snapshot = reputation_result.model_dump()
+            await db.flush()
+
     # 10. Build RiskContext and run Risk Engine
     # Find amount deviation from drift field comparisons
     amount_deviation_for_risk = None
@@ -390,6 +619,9 @@ async def _decide_transaction_impl(
             else None
         ),
         agent_trust_score=agent_trust_score,
+        agent_reputation_score=agent_reputation_score,
+        agent_reputation_level=agent_reputation_level,
+        agent_reputation_available=reputation_available,
         velocity=velocity_context,
     )
 

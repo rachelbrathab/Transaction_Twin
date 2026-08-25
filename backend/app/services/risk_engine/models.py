@@ -30,6 +30,7 @@ class RiskSignalType(StrEnum):
     INTENT_DRIFT = "intent_drift"
     AMOUNT_ANOMALY = "amount_anomaly"
     AGENT_TRUST = "agent_trust"
+    AGENT_BEHAVIOR = "agent_behavior"
     MERCHANT_TRUST = "merchant_trust"
     POLICY_INTERACTION = "policy_interaction"
     VELOCITY = "velocity"
@@ -47,6 +48,7 @@ class SourceEngine(StrEnum):
     VELOCITY_AGGREGATOR = "velocity_aggregator"
     DATABASE = "database"
     RISK_ENGINE = "risk_engine"
+    REPUTATION_ENGINE = "reputation_engine"
 
 
 # ── Velocity Context ───────────────────────────────────────────────
@@ -124,6 +126,11 @@ class RiskContext(BaseModel):
     # ── Trust (from database) ─────────────────────────────
     agent_trust_score: float | None = None
     merchant_trust_score: float | None = None
+
+    # ── Reputation (from Reputation Engine) ──────────────
+    agent_reputation_score: float | None = None
+    agent_reputation_level: str | None = None
+    agent_reputation_available: bool = False
 
     # ── Velocity (pre-computed by API layer) ──────────────
     velocity: VelocityContext | None = None

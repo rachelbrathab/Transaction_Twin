@@ -37,6 +37,7 @@ from app.services.risk_engine.models import (
     RiskSignalType,
 )
 from app.services.risk_engine.signals import (
+    extract_agent_behavior_signal,
     extract_agent_trust_signal,
     extract_amount_anomaly_signal,
     extract_currency_mismatch_signal,
@@ -51,10 +52,13 @@ from app.services.risk_engine.signals import (
 logger = structlog.get_logger()
 
 # Ordered list of signal extractors — deterministic evaluation order
+# Sprint 8: AGENT_TRUST and AGENT_BEHAVIOR are mutually exclusive —
+# each extractor returns None when the other is active.
 _SIGNAL_EXTRACTORS = [
     extract_intent_drift_signal,
     extract_amount_anomaly_signal,
-    extract_agent_trust_signal,
+    extract_agent_behavior_signal,  # Returns None when reputation unavailable
+    extract_agent_trust_signal,     # Returns None when reputation available
     extract_merchant_trust_signal,
     extract_policy_interaction_signal,
     extract_velocity_signal,
@@ -187,6 +191,7 @@ def _signal_to_component_key(signal_type: RiskSignalType) -> str | None:
     mapping = {
         RiskSignalType.INTENT_DRIFT: "intent_match",
         RiskSignalType.AGENT_TRUST: "agent_trust",
+        RiskSignalType.AGENT_BEHAVIOR: "agent_trust",  # Maps to same component
         RiskSignalType.MERCHANT_TRUST: "merchant_risk",
         RiskSignalType.POLICY_INTERACTION: "policy_risk",
         RiskSignalType.VELOCITY: "velocity_risk",

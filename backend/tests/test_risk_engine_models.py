@@ -27,7 +27,7 @@ class TestRiskLevel:
 
 class TestRiskSignalType:
     def test_all_types_exist(self):
-        assert len(RiskSignalType) == 9
+        assert len(RiskSignalType) == 10  # Sprint 8 added AGENT_BEHAVIOR
 
     def test_intent_drift_value(self):
         assert RiskSignalType.INTENT_DRIFT.value == "intent_drift"
@@ -38,7 +38,7 @@ class TestRiskSignalType:
 
 class TestSourceEngine:
     def test_all_sources_exist(self):
-        assert len(SourceEngine) == 6
+        assert len(SourceEngine) == 7  # Sprint 8 added REPUTATION_ENGINE
 
     def test_risk_engine_value(self):
         assert SourceEngine.RISK_ENGINE.value == "risk_engine"

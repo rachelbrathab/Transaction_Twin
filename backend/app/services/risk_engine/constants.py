@@ -13,7 +13,7 @@ from app.services.risk_engine.models import RiskLevel, RiskSignalType
 SIGNAL_WEIGHTS: dict[RiskSignalType, float] = {
     RiskSignalType.INTENT_DRIFT: 0.25,
     RiskSignalType.AMOUNT_ANOMALY: 0.15,
-    RiskSignalType.AGENT_TRUST: 0.15,
+    RiskSignalType.AGENT_TRUST: 0.15,    # Used when reputation unavailable
     RiskSignalType.MERCHANT_TRUST: 0.10,
     RiskSignalType.POLICY_INTERACTION: 0.20,
     RiskSignalType.VELOCITY: 0.05,
@@ -21,6 +21,11 @@ SIGNAL_WEIGHTS: dict[RiskSignalType, float] = {
     RiskSignalType.CURRENCY_MISMATCH: 0.05,
     RiskSignalType.GEOGRAPHIC_ANOMALY: 0.05,
 }
+# NOTE (Sprint 8): When agent_reputation_available == True,
+# AGENT_BEHAVIOR replaces AGENT_TRUST — only one trust signal
+# is ever emitted per evaluation. AGENT_BEHAVIOR uses the same
+# weight as AGENT_TRUST (0.15). It is NOT listed separately
+# in SIGNAL_WEIGHTS to preserve Sprint 7 calibration.
 
 # Verify weights sum to 1.0 (excluding DATA_QUALITY)
 _score_weights = {k: v for k, v in SIGNAL_WEIGHTS.items() if v > 0}
@@ -38,7 +43,12 @@ CORRELATION_GROUPS: dict[str, list[RiskSignalType]] = {
         RiskSignalType.AMOUNT_ANOMALY,
     ],
     "trust": [
+        # Sprint 8: Only ONE of AGENT_TRUST or AGENT_BEHAVIOR is ever
+        # emitted per evaluation (mutual exclusion in signal extractors).
+        # Both are listed here so the group applies regardless of which
+        # trust path is active.
         RiskSignalType.AGENT_TRUST,
+        RiskSignalType.AGENT_BEHAVIOR,
         RiskSignalType.MERCHANT_TRUST,
     ],
     "geographic": [

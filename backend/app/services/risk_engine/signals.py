@@ -200,18 +200,81 @@ def extract_amount_anomaly_signal(ctx: RiskContext) -> RiskEvidence | None:
         risk_level=_contribution_to_level(contribution),
         source_engine=SourceEngine.RISK_ENGINE,
         source_fields=["proposal_amount", "intent_amount_max", "intent_amount_min"],
+    )# ── AGENT BEHAVIOR (Sprint 8) ───────────────────────────────────
+def extract_agent_behavior_signal(ctx: RiskContext) -> RiskEvidence | None:
+    """Extract agent behavioral reputation risk signal.
+
+    Consumes Reputation Engine output (agent_reputation_score).
+    When available, this REPLACES the legacy AGENT_TRUST signal.
+    Only ONE of (AGENT_TRUST, AGENT_BEHAVIOR) is ever emitted per evaluation.
+    """
+    if not ctx.agent_reputation_available:
+        return None  # Legacy path: AGENT_TRUST will handle it
+
+    score = ctx.agent_reputation_score
+    level = ctx.agent_reputation_level
+
+    if score is None:
+        return RiskEvidence(
+            signal_type=RiskSignalType.AGENT_BEHAVIOR,
+            risk_contribution=0.0,
+            confidence=0.5,
+            what="Agent reputation score is not available",
+            why="Cannot assess agent behavioral reputation",
+            evidence={"agent_id": ctx.agent_id},
+            source_engine=SourceEngine.REPUTATION_ENGINE,
+            source_fields=["agent_reputation_score"],
+        )
+
+    if score >= 0.70:
+        contribution = 0.0
+        what = f"Agent reputation is {score:.2f} ({level}) -- well-established trust"
+        why = "No risk contribution from agent behavioral reputation"
+    elif score >= 0.40:
+        contribution = 0.05
+        what = f"Agent reputation is {score:.2f} ({level}) -- moderate trust"
+        why = "Agent has moderate behavioral reputation"
+    elif score >= 0.20:
+        contribution = 0.15
+        what = f"Agent reputation is {score:.2f} ({level}) -- below threshold"
+        why = "Agent behavioral reputation indicates elevated risk"
+    else:
+        contribution = 0.30
+        what = f"Agent reputation is {score:.2f} ({level}) -- low trust"
+        why = "Agent has low behavioral reputation"
+
+    return RiskEvidence(
+        signal_type=RiskSignalType.AGENT_BEHAVIOR,
+        risk_contribution=round(contribution, 4),
+        confidence=1.0,
+        what=what,
+        why=why,
+        evidence={
+            "reputation_score": score,
+            "reputation_level": level,
+            "agent_id": ctx.agent_id,
+        },
+        risk_level=_contribution_to_level(contribution),
+        source_engine=SourceEngine.REPUTATION_ENGINE,
+        source_fields=["agent_reputation_score", "agent_reputation_level"],
     )
 
 
 # ── AGENT TRUST ────────────────────────────────────────────────────
-
 
 def extract_agent_trust_signal(ctx: RiskContext) -> RiskEvidence | None:
     """Extract agent trust risk signal.
 
     Known low trust → NEGATIVE evidence (contribution > 0).
     Unknown trust → UNKNOWN (contribution 0, reduced confidence).
+
+    Sprint 8: When behavioral reputation is available, this returns None.
+    AGENT_BEHAVIOR replaces AGENT_TRUST — only ONE trust signal per evaluation.
     """
+    # Sprint 8: Skip when behavioral reputation is available
+    if ctx.agent_reputation_available:
+        return None  # AGENT_BEHAVIOR handles it
+
     score = ctx.agent_trust_score
 
     if score is None:
