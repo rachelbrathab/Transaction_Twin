@@ -5,7 +5,14 @@ Aggregates all versioned endpoint routers.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import comparisons, health, intents, policies, transactions
+from app.api.v1.endpoints import (
+    analytics,
+    comparisons,
+    health,
+    intents,
+    policies,
+    transactions,
+)
 
 api_router = APIRouter()
 
@@ -14,4 +21,5 @@ api_router.include_router(intents.router, tags=["Intents"])
 api_router.include_router(comparisons.router, tags=["Comparisons"])
 api_router.include_router(policies.router, tags=["Policies"])
 api_router.include_router(transactions.router, tags=["Transactions"])
+api_router.include_router(analytics.router, tags=["Analytics"])
 
