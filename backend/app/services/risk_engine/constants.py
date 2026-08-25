@@ -95,6 +95,10 @@ CONFIDENCE_REDUCTIONS: dict[str, float] = {
     "network_shared_risk": 0.15,
     "network_concentration": 0.10,
     "network_cluster_risk": 0.15,
+    # Sprint 10: Behavioral anomaly confidence reductions
+    "behavioral_amount_anomaly": 0.15,
+    "behavioral_frequency_anomaly": 0.10,
+    "behavioral_merchant_anomaly": 0.10,
 }
 
 CONFIDENCE_FLOOR = 0.1

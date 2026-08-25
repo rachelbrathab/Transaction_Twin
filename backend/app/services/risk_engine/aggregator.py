@@ -145,6 +145,26 @@ def compute_confidence(ctx: RiskContext, signals: list[RiskEvidence]) -> float:
         ):
             confidence -= CONFIDENCE_REDUCTIONS["network_cluster_risk"]
 
+    # Sprint 10: Behavioral anomaly confidence reductions
+    # Behavioral anomaly reduces confidence when concerning patterns are found.
+    # Does NOT enter weighted signal scoring — preserves Sprint 7/8/9 calibration.
+    if ctx.behavioral_anomaly_available:
+        if (
+            ctx.behavioral_anomaly_amount_score is not None
+            and ctx.behavioral_anomaly_amount_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["behavioral_amount_anomaly"]
+        if (
+            ctx.behavioral_anomaly_frequency_score is not None
+            and ctx.behavioral_anomaly_frequency_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["behavioral_frequency_anomaly"]
+        if (
+            ctx.behavioral_anomaly_merchant_score is not None
+            and ctx.behavioral_anomaly_merchant_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["behavioral_merchant_anomaly"]
+
     confidence = max(CONFIDENCE_FLOOR, confidence)
 
     # Blend with average signal confidence

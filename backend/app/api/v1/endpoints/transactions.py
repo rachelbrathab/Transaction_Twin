@@ -30,6 +30,11 @@ from app.schemas.decision_engine import (
     PolicySummaryResponse,
     RiskSummaryResponse,
 )
+from app.services.behavioral_engine.engine import BehavioralBaselineEngine
+from app.services.behavioral_engine.models import (
+    AnomalyContext,
+    TransactionRecord,
+)
 from app.services.comparison_engine.engine import ComparisonEngine
 from app.services.comparison_engine.models import TransactionProposal
 from app.services.decision_engine.engine import DecisionEngine
@@ -451,6 +456,64 @@ async def _build_graph_context(
     )
 
 
+# Behavioral Engine (Sprint 10)
+BEHAVIORAL_WINDOW_DAYS = 90
+BEHAVIORAL_MAX_ROWS = 500
+
+
+async def _build_anomaly_context(
+    db: AsyncSession,
+    agent_id: uuid.UUID,
+    user_id: uuid.UUID,
+    proposal_merchant_id: uuid.UUID | None = None,
+) -> AnomalyContext:
+    """Build AnomalyContext for behavioral anomaly detection.
+
+    Uses a single bounded query with a 90-day window.
+    """
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=BEHAVIORAL_WINDOW_DAYS)
+
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.agent_id == agent_id)
+        .where(Transaction.created_at >= window_start)
+        .order_by(Transaction.created_at.asc())
+        .limit(BEHAVIORAL_MAX_ROWS)
+    )
+    transactions = result.scalars().all()
+
+    if not transactions:
+        return AnomalyContext(
+            agent_id=str(agent_id),
+            user_id=str(user_id),
+            history_available=False,
+        )
+
+    records = [
+        TransactionRecord(
+            transaction_id=str(t.id),
+            amount=float(t.amount),
+            currency=t.currency,
+            transaction_type=t.transaction_type,
+            merchant_id=str(t.merchant_id) if t.merchant_id else None,
+            created_at=t.created_at.isoformat(),
+        )
+        for t in transactions
+    ]
+
+    return AnomalyContext(
+        agent_id=str(agent_id),
+        user_id=str(user_id),
+        transactions=records,
+        proposal_merchant_id=(
+            str(proposal_merchant_id) if proposal_merchant_id else None
+        ),
+        history_window_days=BEHAVIORAL_WINDOW_DAYS,
+        history_available=True,
+    )
+
+
 @router.post("/transactions/decide", response_model=DecisionResponse)
 async def decide_transaction(
     request: DecisionRequest,
@@ -736,6 +799,21 @@ async def _decide_transaction_impl(
         logger.warning("graph_risk_error", error=str(e))
         network_risk_result = None
 
+    # 9.7. Compute Behavioral Anomaly (Sprint 10)
+    behavioral_result = None
+    try:
+        anomaly_context = await _build_anomaly_context(
+            db=db,
+            agent_id=agent_uuid,
+            user_id=user_uuid,
+            proposal_merchant_id=proposal.merchant_id,
+        )
+        behavioral_engine = BehavioralBaselineEngine()
+        behavioral_result = behavioral_engine.evaluate(anomaly_context)
+    except Exception as e:
+        logger.warning("behavioral_anomaly_error", error=str(e))
+        behavioral_result = None
+
     # 10. Build RiskContext and run Risk Engine
     # Find amount deviation from drift field comparisons
     amount_deviation_for_risk = None
@@ -827,6 +905,42 @@ async def _decide_transaction_impl(
                 None,
             )
             if network_risk_result
+            else None
+        ),
+        # Sprint 10: Behavioral anomaly fields
+        behavioral_anomaly_available=(
+            behavioral_result is not None
+        ),
+        behavioral_anomaly_score=(
+            behavioral_result.overall_score
+            if behavioral_result
+            else None
+        ),
+        behavioral_anomaly_amount_score=(
+            next(
+                (d.score for d in behavioral_result.dimensions
+                 if d.dimension.value == "amount"),
+                None,
+            )
+            if behavioral_result
+            else None
+        ),
+        behavioral_anomaly_frequency_score=(
+            next(
+                (d.score for d in behavioral_result.dimensions
+                 if d.dimension.value == "frequency"),
+                None,
+            )
+            if behavioral_result
+            else None
+        ),
+        behavioral_anomaly_merchant_score=(
+            next(
+                (d.score for d in behavioral_result.dimensions
+                 if d.dimension.value == "merchant"),
+                None,
+            )
+            if behavioral_result
             else None
         ),
     )

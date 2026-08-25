@@ -149,6 +149,21 @@ class RiskContext(BaseModel):
         default=None, ge=0.0, le=1.0
     )
 
+    # ── Behavioral Anomaly (Sprint 10) ──────────────────
+    behavioral_anomaly_available: bool = False
+    behavioral_anomaly_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    behavioral_anomaly_amount_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    behavioral_anomaly_frequency_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    behavioral_anomaly_merchant_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+
 
 # ── Risk Evidence ──────────────────────────────────────────────────
 
