@@ -34,6 +34,13 @@ from app.services.comparison_engine.engine import ComparisonEngine
 from app.services.comparison_engine.models import TransactionProposal
 from app.services.decision_engine.engine import DecisionEngine
 from app.services.decision_engine.models import DecisionContext
+from app.services.graph_risk_engine.engine import GraphRiskEngine
+from app.services.graph_risk_engine.models import (
+    AgentTransactionRecord,
+    GraphContext,
+    MerchantPeerRecord,
+    SiblingAgentRecord,
+)
 from app.services.intent_engine.models import StructuredIntent
 from app.services.policy_engine.evaluator import PolicyEvaluator
 from app.services.policy_engine.models import EvaluationContext
@@ -55,6 +62,12 @@ REPUTATION_CACHE_SECONDS = 3600
 # History window for reputation computation (90 days)
 REPUTATION_WINDOW_DAYS = 90
 REPUTATION_MAX_ROWS = 1000
+
+# Graph Risk Engine (Sprint 9)
+GRAPH_WINDOW_DAYS = 90
+GRAPH_MAX_ROWS = 500
+GRAPH_MAX_MERCHANT_AGENTS = 100
+GRAPH_MAX_SIBLING_AGENTS = 50
 
 
 async def _build_velocity_context(
@@ -297,6 +310,144 @@ async def _build_behavioral_context(
         history_available=True,
         decision_history_available=total_decisions > 0,
         risk_history_available=len(risk_assessments) > 0,
+    )
+
+
+async def _build_graph_context(
+    db: AsyncSession,
+    agent_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> GraphContext:
+    """Build GraphContext for network risk analysis.
+
+    Uses bounded queries with a 90-day window.
+    Extracts agent transactions, merchant peers, and sibling agents.
+    """
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=GRAPH_WINDOW_DAYS)
+
+    # Query 1: Agent's own transactions (bounded)
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.agent_id == agent_id)
+        .where(Transaction.created_at >= window_start)
+        .order_by(Transaction.created_at.desc())
+        .limit(GRAPH_MAX_ROWS)
+    )
+    agent_txns = result.scalars().all()
+
+    if not agent_txns:
+        return GraphContext(
+            target_agent_id=str(agent_id),
+            target_user_id=str(user_id),
+            graph_available=False,
+        )
+
+    # Extract unique merchant IDs from agent's transactions
+    merchant_ids = list({t.merchant_id for t in agent_txns if t.merchant_id})
+
+    # Query 2: Other agents' transactions at same merchants (bounded)
+    merchant_peers: list[MerchantPeerRecord] = []
+    if merchant_ids:
+        peer_result = await db.execute(
+            select(Transaction)
+            .where(Transaction.merchant_id.in_(merchant_ids))
+            .where(Transaction.agent_id != agent_id)
+            .where(Transaction.created_at >= window_start)
+            .order_by(Transaction.created_at.desc())
+            .limit(GRAPH_MAX_MERCHANT_AGENTS)
+        )
+        peer_txns = peer_result.scalars().all()
+
+        # Group by agent_id to get per-agent summaries
+        peer_agents: dict[uuid.UUID, list[Transaction]] = {}
+        for pt in peer_txns:
+            if pt.agent_id not in peer_agents:
+                peer_agents[pt.agent_id] = []
+            peer_agents[pt.agent_id].append(pt)
+
+        # Load trust scores for peer agents
+        peer_agent_ids = list(peer_agents.keys())
+        if peer_agent_ids:
+            agent_trust_result = await db.execute(
+                select(Agent.id, Agent.trust_score)
+                .where(Agent.id.in_(peer_agent_ids))
+            )
+            trust_map = {
+                row.id: float(row.trust_score) if row.trust_score else None
+                for row in agent_trust_result
+            }
+
+            for peer_agent_id, peer_txn_list in peer_agents.items():
+                # Find which merchant this peer shares with the target agent
+                shared_merchant_ids = {
+                    t.merchant_id for t in peer_txn_list if t.merchant_id
+                } & set(merchant_ids)
+                for mid in shared_merchant_ids:
+                    merchant_peers.append(MerchantPeerRecord(
+                        agent_id=str(peer_agent_id),
+                        merchant_id=str(mid),
+                        trust_score=trust_map.get(peer_agent_id),
+                        transaction_count=len(peer_txn_list),
+                        latest_transaction_at=(
+                            peer_txn_list[0].created_at.isoformat()
+                            if peer_txn_list else ""
+                        ),
+                    ))
+
+    # Query 3: Sibling agents under the same user (bounded)
+    sibling_result = await db.execute(
+        select(Agent)
+        .where(Agent.user_id == user_id)
+        .where(Agent.id != agent_id)
+        .limit(GRAPH_MAX_SIBLING_AGENTS)
+    )
+    sibling_models = sibling_result.scalars().all()
+
+    # Query 4: Sibling transaction counts (single bounded query)
+    sibling_txn_counts: dict[uuid.UUID, int] = {}
+    if sibling_models:
+        sibling_ids = [sa.id for sa in sibling_models]
+        sibling_txn_result = await db.execute(
+            select(Transaction.agent_id)
+            .where(Transaction.agent_id.in_(sibling_ids))
+            .where(Transaction.created_at >= window_start)
+        )
+        for row in sibling_txn_result:
+            sid = row[0]
+            sibling_txn_counts[sid] = sibling_txn_counts.get(sid, 0) + 1
+
+    sibling_agents: list[SiblingAgentRecord] = []
+    for sa in sibling_models:
+        sibling_agents.append(SiblingAgentRecord(
+            agent_id=str(sa.id),
+            name=sa.name,
+            trust_score=float(sa.trust_score) if sa.trust_score else None,
+            status=sa.status,
+            transaction_count=sibling_txn_counts.get(sa.id, 0),
+        ))
+
+    # Build agent transaction records
+    agent_txn_records = [
+        AgentTransactionRecord(
+            transaction_id=str(t.id),
+            merchant_id=str(t.merchant_id) if t.merchant_id else None,
+            amount=float(t.amount),
+            currency=t.currency,
+            transaction_type=t.transaction_type,
+            created_at=t.created_at.isoformat(),
+        )
+        for t in agent_txns
+    ]
+
+    return GraphContext(
+        target_agent_id=str(agent_id),
+        target_user_id=str(user_id),
+        agent_transactions=agent_txn_records,
+        merchant_peer_records=merchant_peers,
+        sibling_agents=sibling_agents,
+        history_window_days=GRAPH_WINDOW_DAYS,
+        graph_available=True,
     )
 
 
@@ -571,6 +722,20 @@ async def _decide_transaction_impl(
             agent_model.reputation_snapshot = reputation_result.model_dump()
             await db.flush()
 
+    # 9.6. Compute Graph Risk (Sprint 9)
+    network_risk_result = None
+    try:
+        graph_context = await _build_graph_context(
+            db=db,
+            agent_id=agent_uuid,
+            user_id=user_uuid,
+        )
+        graph_risk_engine = GraphRiskEngine()
+        network_risk_result = graph_risk_engine.evaluate(graph_context)
+    except Exception as e:
+        logger.warning("graph_risk_error", error=str(e))
+        network_risk_result = None
+
     # 10. Build RiskContext and run Risk Engine
     # Find amount deviation from drift field comparisons
     amount_deviation_for_risk = None
@@ -623,6 +788,47 @@ async def _decide_transaction_impl(
         agent_reputation_level=agent_reputation_level,
         agent_reputation_available=reputation_available,
         velocity=velocity_context,
+        # Sprint 9: Network risk fields
+        network_risk_available=(
+            network_risk_result is not None
+        ),
+        network_risk_score=(
+            network_risk_result.overall_score
+            if network_risk_result
+            else None
+        ),
+        network_risk_confidence=(
+            network_risk_result.confidence
+            if network_risk_result
+            else None
+        ),
+        network_risk_shared_exposure_score=(
+            next(
+                (s.score for s in network_risk_result.signals
+                 if s.signal_type.value == "shared_risk_exposure"),
+                None,
+            )
+            if network_risk_result
+            else None
+        ),
+        network_risk_concentration_score=(
+            next(
+                (s.score for s in network_risk_result.signals
+                 if s.signal_type.value == "merchant_concentration"),
+                None,
+            )
+            if network_risk_result
+            else None
+        ),
+        network_risk_cluster_risk_score=(
+            next(
+                (s.score for s in network_risk_result.signals
+                 if s.signal_type.value == "agent_cluster_risk"),
+                None,
+            )
+            if network_risk_result
+            else None
+        ),
     )
 
     risk_engine = RiskEngine()

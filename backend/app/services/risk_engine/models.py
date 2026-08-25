@@ -135,6 +135,20 @@ class RiskContext(BaseModel):
     # ── Velocity (pre-computed by API layer) ──────────────
     velocity: VelocityContext | None = None
 
+    # ── Network Risk (Sprint 9 — from Graph Risk Engine) ──
+    network_risk_available: bool = False
+    network_risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    network_risk_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    network_risk_shared_exposure_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    network_risk_concentration_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    network_risk_cluster_risk_score: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+
 
 # ── Risk Evidence ──────────────────────────────────────────────────
 

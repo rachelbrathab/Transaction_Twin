@@ -124,6 +124,27 @@ def compute_confidence(ctx: RiskContext, signals: list[RiskEvidence]) -> float:
     if ctx.proposal_amount is None:
         confidence -= CONFIDENCE_REDUCTIONS["proposal_amount_missing"]
 
+    # Sprint 9: Network risk confidence reductions
+    # Network risk reduces confidence when concerning patterns are found.
+    # This is the primary integration mechanism — network risk does NOT
+    # enter the weighted signal scoring to preserve Sprint 7/8 calibration.
+    if ctx.network_risk_available:
+        if (
+            ctx.network_risk_shared_exposure_score is not None
+            and ctx.network_risk_shared_exposure_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["network_shared_risk"]
+        if (
+            ctx.network_risk_concentration_score is not None
+            and ctx.network_risk_concentration_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["network_concentration"]
+        if (
+            ctx.network_risk_cluster_risk_score is not None
+            and ctx.network_risk_cluster_risk_score > 0.10
+        ):
+            confidence -= CONFIDENCE_REDUCTIONS["network_cluster_risk"]
+
     confidence = max(CONFIDENCE_FLOOR, confidence)
 
     # Blend with average signal confidence

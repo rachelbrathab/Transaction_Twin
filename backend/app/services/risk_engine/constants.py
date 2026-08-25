@@ -91,6 +91,10 @@ CONFIDENCE_REDUCTIONS: dict[str, float] = {
     "intent_confidence_missing": 0.10,
     "policy_missing": 0.10,
     "proposal_amount_missing": 0.05,
+    # Sprint 9: Network risk confidence reductions
+    "network_shared_risk": 0.15,
+    "network_concentration": 0.10,
+    "network_cluster_risk": 0.15,
 }
 
 CONFIDENCE_FLOOR = 0.1
