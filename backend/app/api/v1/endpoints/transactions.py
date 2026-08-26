@@ -1031,9 +1031,29 @@ async def _decide_transaction_impl(
         ),
     }
 
+    # 13.5. Create Transaction record for ALL decisions (Sprint 12)
+    db_transaction = Transaction(
+        user_id=user_uuid,
+        agent_id=agent_uuid,
+        intent_id=intent_model.id,
+        policy_id=most_severe_policy_id,
+        merchant_id=proposal.merchant_id,
+        idempotency_key=uuid.uuid4(),
+        transaction_type=proposal.transaction_type.value,
+        amount=float(proposal.amount),
+        currency=proposal.currency,
+        status="decided",
+        metadata_={
+            "decision": decision_result.decision.value,
+            "evaluation_id": decision_result.evaluation_id,
+        },
+    )
+    db.add(db_transaction)
+    await db.flush()
+
     db_decision = Decision(
-        transaction_id=None,  # No Transaction record yet in Sprint 6
-        risk_assessment_id=None,  # Risk Engine not available in Sprint 6
+        transaction_id=db_transaction.id,
+        risk_assessment_id=None,
         policy_id=most_severe_policy_id,
         decision=decision_result.decision.value,
         reason=decision_result.reason,
@@ -1041,6 +1061,24 @@ async def _decide_transaction_impl(
         version=1,
     )
     db.add(db_decision)
+    await db.flush()
+
+    # 13.6. Create initial TransactionEvent (Sprint 12)
+    from app.models.transaction_event import TransactionEvent
+
+    decision_event = TransactionEvent(
+        transaction_id=db_transaction.id,
+        agent_id=agent_uuid,
+        sequence_number=1,
+        event_type="decision_created",
+        source="system",
+        verification_state="verified",
+        payload={
+            "decision": decision_result.decision.value,
+            "evaluation_id": decision_result.evaluation_id,
+        },
+    )
+    db.add(decision_event)
     await db.flush()
 
     # 14. Create AuditEvent
@@ -1081,6 +1119,7 @@ async def _decide_transaction_impl(
         intent_id=decision_result.intent_id,
         intent_version=decision_result.intent_version,
         proposal_intent_id=decision_result.proposal_intent_id,
+        transaction_id=str(db_transaction.id),
         policy_summary=(
             PolicySummaryResponse(
                 total_policies=decision_result.policy_summary.total_policies,

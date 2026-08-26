@@ -55,6 +55,10 @@ class DecisionResponse(BaseModel):
     intent_id: str
     intent_version: int
     proposal_intent_id: str
+    transaction_id: str | None = Field(
+        default=None,
+        description="Transaction record created for this decision (Sprint 12)",
+    )
     policy_summary: PolicySummaryResponse | None = None
     risk_summary: RiskSummaryResponse | None = None
     drift_summary: DriftSummaryResponse | None = None

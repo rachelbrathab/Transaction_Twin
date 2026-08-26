@@ -25,6 +25,11 @@ class TransactionEvent(Base):
     sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
     payload: Mapped[dict | None] = mapped_column(CompatibleJSONB(), nullable=True)
+    # Sprint 12: outcome event provenance fields
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    verification_state: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         nullable=False, default=lambda: datetime.now(UTC)
     )

@@ -9,8 +9,11 @@ from app.api.v1.endpoints import (
     analytics,
     comparisons,
     health,
+    history,
     intents,
+    outcomes,
     policies,
+    reviews,
     transactions,
 )
 
@@ -21,5 +24,8 @@ api_router.include_router(intents.router, tags=["Intents"])
 api_router.include_router(comparisons.router, tags=["Comparisons"])
 api_router.include_router(policies.router, tags=["Policies"])
 api_router.include_router(transactions.router, tags=["Transactions"])
+api_router.include_router(outcomes.router, tags=["Outcomes"])
+api_router.include_router(reviews.router, tags=["Reviews"])
+api_router.include_router(history.router, tags=["Transaction History"])
 api_router.include_router(analytics.router, tags=["Analytics"])
 
