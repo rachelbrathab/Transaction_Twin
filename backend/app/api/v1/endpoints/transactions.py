@@ -35,6 +35,8 @@ from app.services.behavioral_engine.models import (
     AnomalyContext,
     TransactionRecord,
 )
+from app.services.calibration_runtime.db_adapter import load_active_calibration
+from app.services.calibration_runtime.resolver import resolve_effective_config
 from app.services.comparison_engine.engine import ComparisonEngine
 from app.services.comparison_engine.models import TransactionProposal
 from app.services.decision_engine.engine import DecisionEngine
@@ -51,6 +53,7 @@ from app.services.policy_engine.evaluator import PolicyEvaluator
 from app.services.policy_engine.models import EvaluationContext
 from app.services.reputation_engine.engine import ReputationEngine
 from app.services.reputation_engine.models import BehavioralContext
+from app.services.risk_engine.config import RiskEngineConfig
 from app.services.risk_engine.engine import RiskEngine
 from app.services.risk_engine.models import RiskContext, VelocityContext
 
@@ -945,8 +948,32 @@ async def _decide_transaction_impl(
         ),
     )
 
+    # 10b. Load active calibration (Sprint 17)
+    risk_engine_config: RiskEngineConfig | None = None
+    try:
+        active_cal = await load_active_calibration(db, proposal.user_id)
+        effective_config = resolve_effective_config(active_cal)
+        if effective_config.calibration_active:
+            risk_engine_config = RiskEngineConfig(
+                signal_weights=effective_config.signal_weights,
+                risk_level_thresholds=effective_config.risk_level_thresholds,
+                confidence_reductions=effective_config.confidence_reductions,
+                confidence_floor=effective_config.confidence_floor,
+                confidence_ceiling=effective_config.confidence_ceiling,
+                calibration_active=True,
+                calibration_version_id=effective_config.source_version_id,
+            )
+    except Exception as e:
+        logger.warning(
+            "calibration_loading_failed",
+            error=str(e),
+            user_id=proposal.user_id,
+        )
+        # Fail closed — use defaults
+        risk_engine_config = None
+
     risk_engine = RiskEngine()
-    risk_result = risk_engine.evaluate(risk_context)
+    risk_result = risk_engine.evaluate(risk_context, risk_engine_config)
 
     # 11. Build DecisionContext
     # Serialize policy results for the Decision Engine
@@ -1170,4 +1197,7 @@ async def _decide_transaction_impl(
         explanation=decision_result.explanation,
         created_at=decision_result.created_at,
         evaluated_at=decision_result.evaluated_at,
+        calibration_active=risk_result.calibration_active,
+        calibration_version_id=risk_result.calibration_version_id,
+        calibration_validation_status=risk_result.calibration_validation_status,
     )

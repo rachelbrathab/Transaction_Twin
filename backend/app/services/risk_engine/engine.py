@@ -23,6 +23,7 @@ from app.services.risk_engine.aggregator import (
     compute_weighted_score,
     score_to_level,
 )
+from app.services.risk_engine.config import RiskEngineConfig
 from app.services.risk_engine.constants import (
     EVALUATOR_VERSION,
     FEATURE_VERSION,
@@ -76,11 +77,18 @@ class RiskEngine:
         result = engine.evaluate(context)
     """
 
-    def evaluate(self, context: RiskContext) -> RiskResult:
+    def evaluate(
+        self,
+        context: RiskContext,
+        config: RiskEngineConfig | None = None,
+    ) -> RiskResult:
         """Evaluate all risk signals and produce a deterministic RiskResult.
 
         Args:
             context: Pre-built RiskContext with all available signals.
+            config: Optional runtime calibration config. When None, the
+                exact existing Risk Engine defaults are used (backward
+                compatible with Sprint 7–16 behavior).
 
         Returns:
             RiskResult with score, level, confidence, signals, and explanation.
@@ -106,18 +114,18 @@ class RiskEngine:
         # Step 2: Apply correlation groups
         correlated_signals = apply_correlation_groups(raw_signals)
 
-        # Step 3: Compute weighted score
-        weighted_score = compute_weighted_score(correlated_signals)
+        # Step 3: Compute weighted score (uses config if provided)
+        weighted_score = compute_weighted_score(correlated_signals, config)
 
         # Step 4: Apply dominant signal boost
         overall_score = apply_dominant_boost(weighted_score, correlated_signals)
         overall_score = round(max(0.0, min(1.0, overall_score)), 4)
 
-        # Step 5: Compute confidence
-        confidence = compute_confidence(context, correlated_signals)
+        # Step 5: Compute confidence (uses config if provided)
+        confidence = compute_confidence(context, correlated_signals, config)
 
-        # Step 6: Map to risk level
-        risk_level = score_to_level(overall_score)
+        # Step 6: Map to risk level (uses config if provided)
+        risk_level = score_to_level(overall_score, config)
 
         # Step 7: Build component scores
         component_scores = _build_component_scores(correlated_signals)
@@ -151,6 +159,14 @@ class RiskEngine:
                 confidence=confidence,
             )
 
+        # Calibration metadata
+        cal_active = config.calibration_active if config else False
+        cal_version = config.calibration_version_id if config else ""
+        cal_status = (
+            "active" if cal_active
+            else "default"
+        )
+
         return RiskResult(
             overall_score=overall_score,
             risk_level=risk_level,
@@ -164,6 +180,9 @@ class RiskEngine:
             evaluator_version=EVALUATOR_VERSION,
             feature_version=FEATURE_VERSION,
             evaluated_at=now.isoformat(),
+            calibration_active=cal_active,
+            calibration_version_id=cal_version,
+            calibration_validation_status=cal_status,
         )
 
 

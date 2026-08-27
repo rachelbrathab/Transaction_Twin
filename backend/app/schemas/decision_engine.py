@@ -66,4 +66,9 @@ class DecisionResponse(BaseModel):
     signal_count: int = 0
     explanation: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
+
+    # Calibration metadata (Sprint 17)
+    calibration_active: bool = False
+    calibration_version_id: str = ""
+    calibration_validation_status: str = "default"
     evaluated_at: str = ""

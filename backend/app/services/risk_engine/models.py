@@ -253,3 +253,8 @@ class RiskResult(BaseModel):
     evaluator_version: str = "risk-v1"
     feature_version: str = "v1"
     evaluated_at: str = ""
+
+    # Calibration metadata (Sprint 17)
+    calibration_active: bool = False
+    calibration_version_id: str = ""
+    calibration_validation_status: str = "default"
