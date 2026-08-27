@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     analytics,
+    calibration_intelligence,
     comparisons,
     health,
     history,
@@ -28,4 +29,8 @@ api_router.include_router(outcomes.router, tags=["Outcomes"])
 api_router.include_router(reviews.router, tags=["Reviews"])
 api_router.include_router(history.router, tags=["Transaction History"])
 api_router.include_router(analytics.router, tags=["Analytics"])
+api_router.include_router(
+    calibration_intelligence.router,
+    tags=["Calibration Intelligence"],
+)
 
