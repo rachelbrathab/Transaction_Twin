@@ -6,6 +6,10 @@ All models are imported here so Alembic can detect them for autogeneration.
 from app.models.agent import Agent
 from app.models.agent_capability import AgentCapability
 from app.models.audit_event import AuditEvent
+from app.models.calibration_recommendation import (
+    CalibrationRecommendationRecord,
+)
+from app.models.calibration_version import CalibrationVersionRecord
 from app.models.decision import Decision
 from app.models.intent import Intent
 from app.models.merchant import Merchant
@@ -27,4 +31,6 @@ __all__ = [
     "RiskAssessment",
     "Decision",
     "AuditEvent",
+    "CalibrationVersionRecord",
+    "CalibrationRecommendationRecord",
 ]
