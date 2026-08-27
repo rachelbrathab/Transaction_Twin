@@ -8,6 +8,8 @@ No database, no API, no LLM, no external service calls.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 from datetime import UTC, datetime
 
@@ -32,9 +34,6 @@ from app.services.calibration_intelligence.recommendations import (
 )
 
 logger = structlog.get_logger()
-
-# Global version counter (deterministic within a process)
-_version_counter = 0
 
 
 class CalibrationIntelligenceEngine:
@@ -70,9 +69,6 @@ class CalibrationIntelligenceEngine:
             CalibrationIntelligenceResult with dataset, metrics,
             and advisory recommendations.
         """
-        global _version_counter
-        _version_counter += 1
-
         start_time = time.monotonic()
         now = datetime.now(UTC)
 
@@ -110,9 +106,15 @@ class CalibrationIntelligenceEngine:
             dataset, agent_names=agent_names,
         )
 
-        # Step 6: Generate recommendations
-        calibration_version = (
-            f"{CALIBRATION_VERSION_PREFIX}{_version_counter}"
+        # Step 6: Generate deterministic version ID
+        calibration_version = _compute_version_id(
+            user_id=user_id,
+            window_days=window_days,
+            dataset=dataset,
+            metrics=metrics,
+            risk_cross_tab=risk_cross_tab,
+            policy_effectiveness=policy_eff,
+            agent_effectiveness=agent_eff,
         )
         recommendations, version = generate_recommendations(
             metrics=metrics,
@@ -145,3 +147,74 @@ class CalibrationIntelligenceEngine:
             version=version,
             computed_at=now.isoformat(),
         )
+
+
+def _compute_version_id(
+    user_id: str,
+    window_days: int,
+    dataset,
+    metrics: list,
+    risk_cross_tab: list,
+    policy_effectiveness: list,
+    agent_effectiveness: list,
+) -> str:
+    """Compute a deterministic version ID from calibration content.
+
+    The version ID is a SHA-256 hash of a canonical serialization of
+    all inputs that affect the calibration result. Same inputs always
+    produce the same version_id, enabling persistence idempotency.
+
+    Excludes: timestamps, process state, random values.
+    """
+    # Build canonical payload with sorted keys
+    payload = {
+        "user_id": user_id,
+        "window_days": window_days,
+        "total_samples": dataset.total_samples,
+        "eligible_samples": dataset.eligible_samples,
+        "excluded_samples": dataset.excluded_samples,
+        "metrics": [
+            {
+                "name": m.metric_name,
+                "value": m.value,
+                "sample_count": m.sample_count,
+            }
+            for m in metrics
+        ],
+        "risk_cross_tab": [
+            {
+                "level": r.risk_level,
+                "correct_allow": r.correct_allow,
+                "correct_block": r.correct_block,
+                "false_positive": r.false_positive,
+                "false_negative": r.false_negative,
+                "total": r.total,
+            }
+            for r in risk_cross_tab
+        ],
+        "policy_effectiveness": [
+            {
+                "id": p.policy_id,
+                "total": p.total_evaluations,
+                "fp_rate": p.fp_rate,
+                "fn_rate": p.fn_rate,
+                "effectiveness": p.effectiveness_score,
+            }
+            for p in policy_effectiveness
+        ],
+        "agent_effectiveness": [
+            {
+                "id": a.agent_id,
+                "total": a.total_verified,
+                "correct": a.correct_count,
+                "fp": a.false_positive_count,
+                "fn": a.false_negative_count,
+            }
+            for a in agent_effectiveness
+        ],
+    }
+
+    # Deterministic JSON serialization (sorted keys, no whitespace)
+    canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+    digest = hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return f"{CALIBRATION_VERSION_PREFIX}{digest}"

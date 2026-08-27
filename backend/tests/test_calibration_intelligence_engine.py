@@ -61,10 +61,18 @@ class TestCalibrationIntelligenceEngine:
         assert len(result.metrics) == 3
         assert result.version is not None
 
-    def test_version_increments(self):
+    def test_version_deterministic_same_inputs(self):
+        """Same inputs produce the same version_id (enables idempotency)."""
         engine = CalibrationIntelligenceEngine()
-        r1 = engine.evaluate([], [], [])
-        r2 = engine.evaluate([], [], [])
+        r1 = engine.evaluate([], [], [], window_days=30)
+        r2 = engine.evaluate([], [], [], window_days=30)
+        assert r1.version.version_id == r2.version.version_id
+
+    def test_version_different_with_different_inputs(self):
+        """Different inputs produce different version_ids."""
+        engine = CalibrationIntelligenceEngine()
+        r1 = engine.evaluate([], [], [], window_days=30)
+        r2 = engine.evaluate([], [], [], window_days=60)
         assert r1.version.version_id != r2.version.version_id
 
     def test_deterministic_results(self):

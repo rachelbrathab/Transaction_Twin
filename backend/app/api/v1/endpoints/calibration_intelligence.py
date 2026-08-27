@@ -148,6 +148,63 @@ class ActivateResponse(BaseModel):
     idempotent: bool = False
 
 
+class GenerateRequest(BaseModel):
+    """Request to generate a calibration version from verified outcomes."""
+
+    window_days: int = Field(
+        default=30,
+        ge=1,
+        le=MAX_WINDOW_DAYS,
+        description="Analysis window in days",
+    )
+
+
+class GenerateResponse(BaseModel):
+    """Response for calibration generation."""
+
+    version_id: str
+    status: str
+    total_samples: int = 0
+    eligible_samples: int = 0
+    excluded_samples: int = 0
+    recommendation_count: int = 0
+    generated_at: str = ""
+    idempotent: bool = False
+
+
+class VersionResponse(BaseModel):
+    """Single calibration version."""
+
+    id: str
+    version_id: str
+    source_window_days: int
+    total_samples: int
+    eligible_samples: int
+    excluded_samples: int
+    recommendation_count: int
+    status: str
+    activated_at: str | None = None
+    activated_by: str | None = None
+    previous_version: str | None = None
+    created_at: str = ""
+
+
+class VersionDetailResponse(BaseModel):
+    """Calibration version with its recommendations."""
+
+    version: VersionResponse
+    recommendations: list[RecommendationResponse] = Field(
+        default_factory=list,
+    )
+
+
+class VersionsListResponse(BaseModel):
+    """List of calibration versions."""
+
+    versions: list[VersionResponse] = Field(default_factory=list)
+    total: int = 0
+
+
 # ── Endpoints ──────────────────────────────────────────────────
 
 
@@ -278,6 +335,121 @@ async def activate_version(
         raise HTTPException(
             status_code=500,
             detail="Version activation failed",
+        ) from e
+
+
+# ── Generate endpoint ───────────────────────────────────────
+
+
+@router.post(
+    "/analytics/calibration/generate",
+    response_model=GenerateResponse,
+)
+async def generate_calibration(
+    request: GenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(
+        ...,
+        description="User ID for ownership validation",
+    ),
+) -> GenerateResponse:
+    """Generate a calibration version from verified outcomes.
+
+    Runs the CalibrationIntelligenceEngine, persists results, and
+    returns the generated version. Idempotent for the same user +
+    calibration version.
+    """
+    try:
+        return await _generate_calibration_impl(
+            db, request, user_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("calibration_generate_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Calibration generation failed",
+        ) from e
+
+
+# ── Version listing endpoints ────────────────────────────────
+
+
+@router.get(
+    "/analytics/calibration/versions",
+    response_model=VersionsListResponse,
+)
+async def list_calibration_versions(
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(
+        ...,
+        description="User ID for ownership validation",
+    ),
+    status: str | None = Query(default=None),
+) -> VersionsListResponse:
+    """List calibration versions for the authenticated user."""
+    try:
+        return await _list_versions_impl(db, user_id, status)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("calibration_versions_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Version listing failed",
+        ) from e
+
+
+@router.get(
+    "/analytics/calibration/versions/{version_id}",
+    response_model=VersionDetailResponse,
+)
+async def get_calibration_version(
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(
+        ...,
+        description="User ID for ownership validation",
+    ),
+) -> VersionDetailResponse:
+    """Get a specific calibration version with its recommendations."""
+    try:
+        return await _get_version_impl(db, version_id, user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("calibration_version_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Version retrieval failed",
+        ) from e
+
+
+@router.get(
+    "/analytics/calibration/recommendations/{recommendation_id}",
+    response_model=RecommendationResponse,
+)
+async def get_calibration_recommendation(
+    recommendation_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(
+        ...,
+        description="User ID for ownership validation",
+    ),
+) -> RecommendationResponse:
+    """Get a specific calibration recommendation."""
+    try:
+        return await _get_recommendation_impl(
+            db, recommendation_id, user_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("calibration_rec_error", error=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Recommendation retrieval failed",
         ) from e
 
 
@@ -750,6 +922,292 @@ async def _activate_version_impl(
         ]),
         idempotent=False,
     )
+
+
+# ── Generate implementation ────────────────────────────────
+
+
+async def _generate_calibration_impl(
+    db: AsyncSession,
+    request: GenerateRequest,
+    user_id: uuid.UUID,
+) -> GenerateResponse:
+    """Generate calibration from verified outcomes and persist."""
+    from datetime import timedelta
+
+    from app.services.calibration_intelligence.engine import (
+        CalibrationIntelligenceEngine,
+    )
+    from app.services.calibration_intelligence.persistence import (
+        persist_calibration_result,
+    )
+
+    now = datetime.now(UTC)
+    window_start = now - timedelta(days=request.window_days)
+
+    # 1. Query transactions — ownership filtered
+    txn_result = await db.execute(
+        select(Transaction)
+        .where(
+            Transaction.created_at >= window_start,
+            Transaction.user_id == user_id,
+        )
+        .order_by(Transaction.created_at.desc())
+        .limit(1000)
+    )
+    txns = txn_result.scalars().all()
+
+    if not txns:
+        return GenerateResponse(
+            version_id="",
+            status="generated",
+            generated_at=now.isoformat(),
+        )
+
+    txn_ids = [t.id for t in txns]
+
+    # 2. Query decisions
+    from app.models.decision import Decision
+
+    dec_result = await db.execute(
+        select(Decision).where(Decision.transaction_id.in_(txn_ids))
+    )
+    decisions = dec_result.scalars().all()
+
+    # 3. Query outcome events
+    evt_result = await db.execute(
+        select(TransactionEvent).where(
+            TransactionEvent.transaction_id.in_(txn_ids),
+        )
+    )
+    events = evt_result.scalars().all()
+
+    # 4. Build record dicts
+    transaction_records = []
+    for t in txns:
+        transaction_records.append({
+            "id": str(t.id),
+            "user_id": str(t.user_id),
+            "agent_id": str(t.agent_id),
+            "status": t.status,
+            "amount": float(t.amount) if t.amount else None,
+            "currency": t.currency,
+            "transaction_type": t.transaction_type,
+            "created_at": t.created_at.isoformat()
+            if t.created_at
+            else "",
+        })
+
+    decision_records = []
+    for d in decisions:
+        explanation = d.explanation or {}
+        decision_records.append({
+            "id": str(d.id),
+            "transaction_id": str(d.transaction_id),
+            "decision": d.decision,
+            "policy_id": str(d.policy_id) if d.policy_id else None,
+            "explanation": explanation,
+            "signal_count": 0,
+            "drift_severity": None,
+            "created_at": d.created_at.isoformat()
+            if d.created_at
+            else "",
+            "feedback_confidence": 0.9,
+        })
+
+    outcome_records = []
+    for e in events:
+        outcome_records.append({
+            "transaction_id": str(e.transaction_id),
+            "event_type": e.event_type,
+            "verification_state": e.verification_state or "pending",
+            "created_at": e.created_at.isoformat()
+            if e.created_at
+            else "",
+        })
+
+    # 5. Run calibration engine
+    engine = CalibrationIntelligenceEngine()
+    result = engine.evaluate(
+        transaction_records=transaction_records,
+        decision_records=decision_records,
+        outcome_records=outcome_records,
+        window_days=request.window_days,
+        user_id=str(user_id),
+    )
+
+    # 6. Persist to database
+    persistence_result = await persist_calibration_result(
+        db, user_id, result,
+    )
+    version_record = persistence_result.version
+    is_new = persistence_result.created
+
+    # 7. Audit event — only for newly created versions
+    if is_new:
+        audit_event = AuditEvent(
+            entity_type="calibration_version",
+            entity_id=version_record.id,
+            event_type="calibration_generated",
+            actor_type="user",
+            actor_id=user_id,
+            metadata_={
+                "version_id": version_record.version_id,
+                "user_id": str(user_id),
+                "previous_status": None,
+                "new_status": "generated",
+                "total_samples": version_record.total_samples,
+                "eligible_samples": version_record.eligible_samples,
+                "recommendation_count": version_record.recommendation_count,
+                "window_days": request.window_days,
+            },
+        )
+        db.add(audit_event)
+        await db.flush()
+
+    return GenerateResponse(
+        version_id=version_record.version_id,
+        status=version_record.status,
+        total_samples=version_record.total_samples,
+        eligible_samples=version_record.eligible_samples,
+        excluded_samples=version_record.excluded_samples,
+        recommendation_count=version_record.recommendation_count,
+        generated_at=version_record.created_at.isoformat()
+        if version_record.created_at
+        else now.isoformat(),
+        idempotent=not is_new,
+    )
+
+
+# ── Version listing implementations ──────────────────────────
+
+
+async def _list_versions_impl(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    status_filter: str | None,
+) -> VersionsListResponse:
+    """List calibration versions for a user."""
+    query = (
+        select(CalibrationVersionRecord)
+        .where(CalibrationVersionRecord.user_id == user_id)
+        .order_by(CalibrationVersionRecord.created_at.desc())
+        .limit(100)
+    )
+    result = await db.execute(query)
+    records = result.scalars().all()
+
+    versions: list[VersionResponse] = []
+    for rec in records:
+        if status_filter and rec.status != status_filter:
+            continue
+        versions.append(VersionResponse(
+            id=str(rec.id),
+            version_id=rec.version_id,
+            source_window_days=rec.source_window_days,
+            total_samples=rec.total_samples,
+            eligible_samples=rec.eligible_samples,
+            excluded_samples=rec.excluded_samples,
+            recommendation_count=rec.recommendation_count,
+            status=rec.status,
+            activated_at=rec.activated_at.isoformat()
+            if rec.activated_at
+            else None,
+            activated_by=str(rec.activated_by)
+            if rec.activated_by
+            else None,
+            previous_version=rec.previous_version,
+            created_at=rec.created_at.isoformat()
+            if rec.created_at
+            else "",
+        ))
+
+    return VersionsListResponse(
+        versions=versions,
+        total=len(versions),
+    )
+
+
+async def _get_version_impl(
+    db: AsyncSession,
+    version_id: str,
+    user_id: uuid.UUID,
+) -> VersionDetailResponse:
+    """Get a specific version with recommendations."""
+    result = await db.execute(
+        select(CalibrationVersionRecord).where(
+            CalibrationVersionRecord.version_id == version_id,
+            CalibrationVersionRecord.user_id == user_id,
+        )
+    )
+    version = result.scalar_one_or_none()
+
+    if version is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Calibration version not found",
+        )
+
+    # Load recommendations for this version
+    recs_result = await db.execute(
+        select(CalibrationRecommendationRecord).where(
+            CalibrationRecommendationRecord.calibration_version
+            == version_id,
+            CalibrationRecommendationRecord.user_id == user_id,
+        )
+    )
+    rec_records = recs_result.scalars().all()
+
+    return VersionDetailResponse(
+        version=VersionResponse(
+            id=str(version.id),
+            version_id=version.version_id,
+            source_window_days=version.source_window_days,
+            total_samples=version.total_samples,
+            eligible_samples=version.eligible_samples,
+            excluded_samples=version.excluded_samples,
+            recommendation_count=version.recommendation_count,
+            status=version.status,
+            activated_at=version.activated_at.isoformat()
+            if version.activated_at
+            else None,
+            activated_by=str(version.activated_by)
+            if version.activated_by
+            else None,
+            previous_version=version.previous_version,
+            created_at=version.created_at.isoformat()
+            if version.created_at
+            else "",
+        ),
+        recommendations=recommendations_from_records(
+            list(rec_records),
+        ),
+    )
+
+
+async def _get_recommendation_impl(
+    db: AsyncSession,
+    recommendation_id: str,
+    user_id: uuid.UUID,
+) -> RecommendationResponse:
+    """Get a specific recommendation."""
+    result = await db.execute(
+        select(CalibrationRecommendationRecord).where(
+            CalibrationRecommendationRecord.id == uuid.UUID(
+                recommendation_id,
+            ),
+            CalibrationRecommendationRecord.user_id == user_id,
+        )
+    )
+    rec = result.scalar_one_or_none()
+
+    if rec is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Recommendation not found",
+        )
+
+    return recommendations_from_records([rec])[0]
 
 
 # ── Helpers ────────────────────────────────────────────────────
