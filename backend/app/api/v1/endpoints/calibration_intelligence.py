@@ -1251,3 +1251,93 @@ def recommendations_from_records(
             rejection_reason=rec.rejection_reason,
         ))
     return results
+
+
+# ── Effective config endpoint ──────────────────────────────────
+
+
+class EffectiveConfigResponse(BaseModel):
+    """Resolved effective calibration configuration."""
+
+    calibration_active: bool = False
+    source_version_id: str = ""
+    signal_weights: dict[str, float] = Field(
+        default_factory=dict,
+    )
+    risk_level_thresholds: dict[str, float] = Field(
+        default_factory=dict,
+    )
+    confidence_reductions: dict[str, float] = Field(
+        default_factory=dict,
+    )
+    confidence_floor: float = 0.1
+    confidence_ceiling: float = 1.0
+    validation_passed: bool = False
+    validation_errors: list[str] = Field(
+        default_factory=list,
+    )
+    parameters_applied: list[str] = Field(
+        default_factory=list,
+    )
+    parameters_rejected: list[str] = Field(
+        default_factory=list,
+    )
+
+
+@router.get(
+    "/analytics/calibration/effective-config",
+    response_model=EffectiveConfigResponse,
+)
+async def get_effective_config(
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(
+        ...,
+        description="User ID for ownership validation",
+    ),
+) -> EffectiveConfigResponse:
+    """Get the resolved effective calibration configuration.
+
+    Returns the effective risk-engine parameters, which include:
+    - defaults when no calibration is active
+    - calibrated values when an active version exists
+    - fail-closed defaults when calibration is invalid
+    """
+    try:
+        return await _get_effective_config_impl(db, user_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to resolve effective config: {e!s}",
+        ) from e
+
+
+async def _get_effective_config_impl(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> EffectiveConfigResponse:
+    """Load active calibration and resolve effective config."""
+    from app.services.calibration_runtime.db_adapter import (
+        load_active_calibration,
+    )
+    from app.services.calibration_runtime.resolver import (
+        resolve_effective_config,
+    )
+
+    active_cal = await load_active_calibration(db, user_id)
+    effective = resolve_effective_config(active_cal)
+
+    return EffectiveConfigResponse(
+        calibration_active=effective.calibration_active,
+        source_version_id=effective.source_version_id,
+        signal_weights=effective.signal_weights,
+        risk_level_thresholds=effective.risk_level_thresholds,
+        confidence_reductions=effective.confidence_reductions,
+        confidence_floor=effective.confidence_floor,
+        confidence_ceiling=effective.confidence_ceiling,
+        validation_passed=effective.validation_passed,
+        validation_errors=effective.validation_errors,
+        parameters_applied=effective.parameters_applied,
+        parameters_rejected=effective.parameters_rejected,
+    )
