@@ -1341,3 +1341,247 @@ async def _get_effective_config_impl(
         parameters_applied=effective.parameters_applied,
         parameters_rejected=effective.parameters_rejected,
     )
+
+
+# ── Calibration Metrics (Sprint 18) ────────────────────────────
+
+
+class CalibrationMetricsResponse(BaseModel):
+    """Read-only calibration health metrics."""
+
+    total_decisions: int = 0
+    calibration_active_count: int = 0
+    default_count: int = 0
+    validation_failed_count: int = 0
+    no_active_calibration_count: int = 0
+    usage_by_version: dict[str, int] = Field(default_factory=dict)
+    risk_level_distribution: dict[str, int] = Field(default_factory=dict)
+
+
+@router.get(
+    "/analytics/calibration/metrics",
+    response_model=CalibrationMetricsResponse,
+)
+async def get_calibration_metrics(
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Query(..., description="User ID for ownership validation"),
+    limit: int = Query(10000, ge=1, le=50000, description="Max decisions to analyze"),
+) -> CalibrationMetricsResponse:
+    """Get calibration health metrics for a user.
+
+    Returns read-only, ownership-scoped metrics about calibration usage,
+    fallback rates, and risk-level distribution.
+    """
+    from app.services.calibration_intelligence.health_metrics import (
+        compute_calibration_metrics,
+    )
+
+    metrics = await compute_calibration_metrics(db, user_id, limit)
+    return CalibrationMetricsResponse(
+        total_decisions=metrics.total_decisions,
+        calibration_active_count=metrics.calibration_active_count,
+        default_count=metrics.default_count,
+        validation_failed_count=metrics.validation_failed_count,
+        no_active_calibration_count=metrics.no_active_calibration_count,
+        usage_by_version=metrics.usage_by_version,
+        risk_level_distribution=metrics.risk_level_distribution,
+    )
+
+
+# ── Safe Rollback (Sprint 18) ───────────────────────────────────
+
+
+class RollbackRequest(BaseModel):
+    """Request to rollback the active calibration version."""
+
+    user_id: uuid.UUID
+    confirm: bool = Field(
+        default=False,
+        description="Must be true to execute rollback",
+    )
+
+
+class RollbackResponse(BaseModel):
+    """Response after rollback."""
+
+    rolled_back: bool
+    previous_active_version: str
+    restored_version: str
+    message: str
+
+
+@router.post(
+    "/analytics/calibration/rollback",
+    response_model=RollbackResponse,
+)
+async def rollback_calibration(
+    request: RollbackRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RollbackResponse:
+    """Rollback the currently ACTIVE calibration to its previous version.
+
+    Requirements:
+    - An ACTIVE version must exist
+    - The ACTIVE version must have a previous_version
+    - The previous version must belong to the same user
+    - confirm=true is required
+    """
+    if not request.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="confirm=true is required for rollback",
+        )
+
+    return await _rollback_impl(db, request.user_id)
+
+
+async def _rollback_impl(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> RollbackResponse:
+    """Execute the rollback logic."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select as sa_select
+
+    from app.services.calibration_intelligence.state_machine import (
+        validate_version_transition,
+    )
+
+    # 1. Find the current ACTIVE version for this user
+    stmt = (
+        sa_select(CalibrationVersionRecord)
+        .where(
+            CalibrationVersionRecord.user_id == user_id,
+            CalibrationVersionRecord.status == "active",
+        )
+    )
+    result = await db.execute(stmt)
+    active_version = result.scalar_one_or_none()
+
+    if active_version is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No active calibration version found",
+        )
+
+    previous_version_id = active_version.previous_version
+    if not previous_version_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Active version has no previous version to restore",
+        )
+
+    # 2. Find the previous version
+    prev_stmt = (
+        sa_select(CalibrationVersionRecord)
+        .where(
+            CalibrationVersionRecord.user_id == user_id,
+            CalibrationVersionRecord.version_id == previous_version_id,
+        )
+    )
+    prev_result = await db.execute(prev_stmt)
+    previous_version = prev_result.scalar_one_or_none()
+
+    if previous_version is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Previous version '{previous_version_id}' not found",
+        )
+
+    # 3. Validate the previous version can be activated
+    is_valid, error_msg = validate_version_transition(
+        previous_version.status, "active",
+    )
+    if not is_valid:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Previous version cannot be activated: {error_msg}",
+        )
+
+    # 4. Check recommendations for the previous version
+    from app.models.calibration_recommendation import (
+        CalibrationRecommendationRecord,
+    )
+
+    rec_stmt = (
+        sa_select(CalibrationRecommendationRecord.status)
+        .where(
+            CalibrationRecommendationRecord.user_id == user_id,
+            CalibrationRecommendationRecord.calibration_version == previous_version_id,
+        )
+    )
+    rec_result = await db.execute(rec_stmt)
+    rec_statuses = [row[0] for row in rec_result.all()]
+
+    from app.services.calibration_intelligence.state_machine import (
+        can_activate_version,
+    )
+
+    can_activate, activate_error = can_activate_version(
+        previous_version.status, rec_statuses,
+    )
+    if not can_activate:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Previous version cannot be activated: {activate_error}",
+        )
+
+    # 5. Atomically: supersede current, activate previous
+    now = datetime.now(UTC)
+
+    # Supersede the current active version
+    active_version.status = "superseded"
+    active_version.updated_at = now
+
+    # Activate the previous version
+    previous_version.status = "active"
+    previous_version.activated_at = now
+    previous_version.activated_by = user_id
+    previous_version.updated_at = now
+
+    # 6. Audit events
+    superseded_audit = AuditEvent(
+        entity_type="calibration_version",
+        entity_id=active_version.id,
+        event_type="calibration_superseded",
+        actor_type="user",
+        actor_id=user_id,
+        metadata_={
+            "version_id": active_version.version_id,
+            "previous_status": "active",
+            "new_status": "superseded",
+            "superseded_by": previous_version.version_id,
+            "user_id": str(user_id),
+        },
+    )
+    db.add(superseded_audit)
+
+    activated_audit = AuditEvent(
+        entity_type="calibration_version",
+        entity_id=previous_version.id,
+        event_type="calibration_activated",
+        actor_type="user",
+        actor_id=user_id,
+        metadata_={
+            "version_id": previous_version.version_id,
+            "previous_status": previous_version.status,
+            "new_status": "active",
+            "user_id": str(user_id),
+            "rollback": True,
+            "rollback_from": active_version.version_id,
+        },
+    )
+    db.add(activated_audit)
+
+    await db.commit()
+
+    return RollbackResponse(
+        rolled_back=True,
+        previous_active_version=active_version.version_id,
+        restored_version=previous_version.version_id,
+        message=(
+            f"Rolled back from '{active_version.version_id}' "
+            f"to '{previous_version.version_id}'"
+        ),
+    )

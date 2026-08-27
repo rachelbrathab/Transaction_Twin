@@ -950,6 +950,8 @@ async def _decide_transaction_impl(
 
     # 10b. Load active calibration (Sprint 17)
     risk_engine_config: RiskEngineConfig | None = None
+    active_cal = None
+    effective_config = None
     try:
         active_cal = await load_active_calibration(db, proposal.user_id)
         effective_config = resolve_effective_config(active_cal)
@@ -974,6 +976,20 @@ async def _decide_transaction_impl(
 
     risk_engine = RiskEngine()
     risk_result = risk_engine.evaluate(risk_context, risk_engine_config)
+
+    # 10c. Track calibration consumption (Sprint 18)
+    calibration_consumed = risk_engine_config is not None and risk_engine_config.calibration_active
+    calibration_version_consumed = (
+        risk_engine_config.calibration_version_id if risk_engine_config else ""
+    )
+    calibration_fallback_reason: str | None = None
+    if not calibration_consumed:
+        if effective_config is not None and not effective_config.validation_passed:
+            calibration_fallback_reason = "validation_failed"
+        elif active_cal is None:
+            calibration_fallback_reason = "no_active_calibration"
+        else:
+            calibration_fallback_reason = "default"
 
     # 11. Build DecisionContext
     # Serialize policy results for the Decision Engine
@@ -1106,6 +1122,25 @@ async def _decide_transaction_impl(
         },
     )
     db.add(decision_event)
+
+    # 13.7. Create calibration consumption event (Sprint 18)
+    calibration_event = TransactionEvent(
+        transaction_id=db_transaction.id,
+        agent_id=agent_uuid,
+        sequence_number=2,
+        event_type="calibration_consumed",
+        source="system",
+        verification_state="verified",
+        payload={
+            "calibration_active": calibration_consumed,
+            "calibration_version_id": calibration_version_consumed,
+            "fallback_reason": calibration_fallback_reason,
+            "risk_level": risk_result.risk_level.value,
+            "risk_score": risk_result.overall_score,
+            "confidence": risk_result.confidence,
+        },
+    )
+    db.add(calibration_event)
     await db.flush()
 
     # 14. Create AuditEvent
