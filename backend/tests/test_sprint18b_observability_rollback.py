@@ -695,8 +695,8 @@ class TestRollback:
             await _teardown_engine(engine)
 
     @pytest.mark.asyncio
-    async def test_rollback_superseded_previous_rejected(self):
-        """Rollback to a superseded previous version is rejected."""
+    async def test_rollback_to_superseded_previous_succeeds(self):
+        """Rollback to a superseded previous version now succeeds."""
         engine = await _setup_engine()
         try:
             factory = async_sessionmaker(
@@ -723,15 +723,13 @@ class TestRollback:
                 await session.commit()
 
             async with factory() as session:
-                from fastapi import HTTPException
-
                 from app.api.v1.endpoints.calibration_intelligence import (
                     _rollback_impl,
                 )
-                with pytest.raises(HTTPException) as exc_info:
-                    await _rollback_impl(session, user_id)
-                # Superseded is terminal — cannot activate
-                assert exc_info.value.status_code == 409
+                resp = await _rollback_impl(session, user_id)
+                assert resp.rolled_back is True
+                assert resp.restored_version == "calibration-v1"
+                await session.commit()
         finally:
             await _teardown_engine(engine)
 
@@ -805,9 +803,9 @@ class TestGovernanceStateMachine:
         assert ok is True
         assert err is None
 
-    def test_superseded_is_terminal(self):
+    def test_superseded_to_active_allowed_for_rollback(self):
         ok, err = validate_version_transition("superseded", "active")
-        assert ok is False
+        assert ok is True
 
     def test_can_activate_generated_with_no_recs(self):
         ok, err = can_activate_version("generated", [])
@@ -826,9 +824,10 @@ class TestGovernanceStateMachine:
         ok, err = can_activate_version("active", [])
         assert ok is True
 
-    def test_superseded_cannot_activate(self):
+    def test_superseded_can_activate_for_rollback(self):
+        """Superseded versions can be reactivated for rollback."""
         ok, err = can_activate_version("superseded", [])
-        assert ok is False
+        assert ok is True
 
 
 # ── No Global Mutation Tests ─────────────────────────────────────

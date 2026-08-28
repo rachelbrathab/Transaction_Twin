@@ -1527,7 +1527,11 @@ async def _rollback_impl(
             detail=f"Previous version cannot be activated: {activate_error}",
         )
 
-    # 5. Atomically: supersede current, activate previous
+    # 5. Capture original statuses BEFORE mutation
+    active_original_status = active_version.status
+    previous_original_status = previous_version.status
+
+    # 6. Atomically: supersede current, activate previous
     now = datetime.now(UTC)
 
     # Supersede the current active version
@@ -1540,7 +1544,7 @@ async def _rollback_impl(
     previous_version.activated_by = user_id
     previous_version.updated_at = now
 
-    # 6. Audit events
+    # 7. Audit events
     superseded_audit = AuditEvent(
         entity_type="calibration_version",
         entity_id=active_version.id,
@@ -1549,7 +1553,7 @@ async def _rollback_impl(
         actor_id=user_id,
         metadata_={
             "version_id": active_version.version_id,
-            "previous_status": "active",
+            "previous_status": active_original_status,
             "new_status": "superseded",
             "superseded_by": previous_version.version_id,
             "user_id": str(user_id),
@@ -1565,7 +1569,7 @@ async def _rollback_impl(
         actor_id=user_id,
         metadata_={
             "version_id": previous_version.version_id,
-            "previous_status": previous_version.status,
+            "previous_status": previous_original_status,
             "new_status": "active",
             "user_id": str(user_id),
             "rollback": True,

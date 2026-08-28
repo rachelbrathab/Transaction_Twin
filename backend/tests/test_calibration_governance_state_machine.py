@@ -179,11 +179,11 @@ class TestVersionTransitions:
         )
         assert ok is False
 
-    def test_superseded_to_active_forbidden(self):
+    def test_superseded_to_active_allowed_for_rollback(self):
         ok, err = validate_version_transition(
             "superseded", "active",
         )
-        assert ok is False
+        assert ok is True
 
     def test_active_to_generated_forbidden(self):
         ok, err = validate_version_transition(
@@ -202,8 +202,8 @@ class TestVersionTransitions:
 
 
 class TestVersionTerminal:
-    def test_superseded_is_terminal(self):
-        assert is_terminal_version("superseded") is True
+    def test_superseded_not_terminal_for_rollback(self):
+        assert is_terminal_version("superseded") is False
 
     def test_generated_not_terminal(self):
         assert is_terminal_version("generated") is False
@@ -265,10 +265,10 @@ class TestCanActivateVersion:
         )
         assert ok is True
 
-    def test_superseded_cannot_activate(self):
+    def test_superseded_can_activate_for_rollback(self):
+        """Superseded versions can be reactivated for rollback."""
         ok, err = can_activate_version("superseded", [])
-        assert ok is False
-        assert "superseded" in err.lower()
+        assert ok is True
 
     def test_approved_status_cannot_activate(self):
         """'approved' is not a valid version status in the two-state lifecycle."""

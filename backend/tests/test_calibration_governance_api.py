@@ -574,7 +574,8 @@ class TestActivationStateMachine:
             await _teardown_engine(engine)
 
     @pytest.mark.asyncio
-    async def test_cannot_activate_superseded(self):
+    async def test_superseded_can_activate_for_rollback(self):
+        """Superseded versions can be reactivated for rollback."""
         engine = await _setup_engine()
         client, factory = await _make_client(engine)
         try:
@@ -591,7 +592,8 @@ class TestActivationStateMachine:
                 params={"user_id": str(USER_A)},
                 json={"confirm": True},
             )
-            assert resp.status_code == 409
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "active"
         finally:
             await client.aclose()
             await _cleanup()

@@ -68,11 +68,10 @@ def is_terminal_recommendation(status: str) -> bool:
 _VERSION_TRANSITIONS: dict[str, set[str]] = {
     "generated": {"active"},
     "active": {"superseded"},
+    "superseded": {"active"},  # rollback: re-enable a previously superseded version
 }
 
-_VERSION_TERMINAL: frozenset[str] = frozenset({
-    "superseded",
-})
+_VERSION_TERMINAL: frozenset[str] = frozenset()
 
 
 def validate_version_transition(
@@ -141,11 +140,12 @@ def can_activate_version(
     if vs == "active":
         return True, None
 
-    # Must be generated to activate (GENERATED → ACTIVE)
-    if vs != "generated":
+    # Allow generated and superseded versions to activate
+    # (superseded → active is valid for rollback operations)
+    if vs not in ("generated", "superseded"):
         return False, (
             f"Version status is '{vs}'. "
-            f"Only 'generated' versions can be activated."
+            f"Only 'generated' or 'superseded' versions can be activated."
         )
 
     # Check that all recommendations have reached a terminal state
