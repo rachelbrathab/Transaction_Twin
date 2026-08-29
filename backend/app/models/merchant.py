@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, Numeric, String
+from sqlalchemy import CheckConstraint, DateTime, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,10 +26,12 @@ class Merchant(Base):
     metadata_: Mapped[dict | None] = mapped_column("metadata", CompatibleJSONB(), nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="active")
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships

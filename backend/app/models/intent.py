@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Numeric, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,14 +32,18 @@ class Intent(Base):
     merchant_constraints: Mapped[dict | None] = mapped_column(CompatibleJSONB(), nullable=True)
     geographic_constraints: Mapped[dict | None] = mapped_column(CompatibleJSONB(), nullable=True)
     authorization_scope: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
     confidence: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     version: Mapped[int] = mapped_column(nullable=False, server_default="1")
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships

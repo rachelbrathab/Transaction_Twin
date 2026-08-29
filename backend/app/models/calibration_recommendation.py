@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -65,19 +65,19 @@ class CalibrationRecommendationRecord(Base):
         String(50), nullable=False, server_default="generated",
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(
-        nullable=True,
+        DateTime(timezone=True), nullable=True,
     )
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True,
     )
     approved_at: Mapped[datetime | None] = mapped_column(
-        nullable=True,
+        DateTime(timezone=True), nullable=True,
     )
     approved_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True,
     )
     activated_at: Mapped[datetime | None] = mapped_column(
-        nullable=True,
+        DateTime(timezone=True), nullable=True,
     )
     activated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True,
@@ -89,10 +89,11 @@ class CalibrationRecommendationRecord(Base):
         String(100), nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC),
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False,
+        DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )

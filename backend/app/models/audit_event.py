@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import String
+from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,5 +32,6 @@ class AuditEvent(Base):
     previous_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     current_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )

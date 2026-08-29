@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,13 +25,19 @@ class Policy(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     rules: Mapped[dict | None] = mapped_column(CompatibleJSONB(), nullable=True)
     scope: Mapped[dict | None] = mapped_column(CompatibleJSONB(), nullable=True)
-    effective_from: Mapped[datetime | None] = mapped_column(nullable=True)
-    effective_until: Mapped[datetime | None] = mapped_column(nullable=True)
+    effective_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    effective_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        nullable=False, default=lambda: datetime.now(UTC)
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationships

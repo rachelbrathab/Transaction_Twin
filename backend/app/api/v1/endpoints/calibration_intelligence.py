@@ -876,9 +876,9 @@ async def _activate_version_impl(
     version.status = "active"
     version.activated_at = now
     version.activated_by = user_id
-    version.previous_version = (
-        previous_active.version_id if previous_active else None
-    )
+    if previous_active is not None:
+        version.previous_version = previous_active.version_id
+    # else: preserve the existing previous_version set during creation
     version.updated_at = now
     await db.flush()
 
