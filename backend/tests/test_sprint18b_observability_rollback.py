@@ -580,6 +580,7 @@ class TestRollback:
                 assert response.rolled_back is True
                 assert response.previous_active_version == "calibration-v2"
                 assert response.restored_version == "calibration-v1"
+                await session.commit()
 
             # Verify final state
             async with factory() as session:
@@ -766,6 +767,7 @@ class TestRollback:
                     _rollback_impl,
                 )
                 await _rollback_impl(session, user_id)
+                await session.commit()
 
             async with factory() as session:
                 stmt = select(AuditEvent).where(

@@ -770,12 +770,14 @@ async def _activate_version_impl(
             detail="Must pass confirm=true to activate a version",
         )
 
-    # 1. Load target version
-    result = await db.execute(
-        select(CalibrationVersionRecord).where(
-            CalibrationVersionRecord.version_id == version_id,
-        )
+    # 1. Load target version with row lock (PostgreSQL SELECT ... FOR UPDATE)
+    is_pg = db.bind.dialect.name == "postgresql"
+    base_stmt = select(CalibrationVersionRecord).where(
+        CalibrationVersionRecord.version_id == version_id,
     )
+    if is_pg:
+        base_stmt = base_stmt.with_for_update()
+    result = await db.execute(base_stmt)
     version = result.scalar_one_or_none()
 
     if version is None:
@@ -813,13 +815,14 @@ async def _activate_version_impl(
             idempotent=True,
         )
 
-    # 5. Load all recommendations for this version
-    recs_result = await db.execute(
-        select(CalibrationRecommendationRecord).where(
-            CalibrationRecommendationRecord.calibration_version
-            == version_id,
-        )
+    # 5. Load all recommendations for this version with row lock
+    recs_stmt = select(CalibrationRecommendationRecord).where(
+        CalibrationRecommendationRecord.calibration_version
+        == version_id,
     )
+    if is_pg:
+        recs_stmt = recs_stmt.with_for_update()
+    recs_result = await db.execute(recs_stmt)
     recommendations = recs_result.scalars().all()
 
     # 6. Validate activation requirements
@@ -833,14 +836,15 @@ async def _activate_version_impl(
             detail=error_msg or "Version cannot be activated",
         )
 
-    # 7. Find and supersede current active version
-    active_result = await db.execute(
-        select(CalibrationVersionRecord).where(
-            CalibrationVersionRecord.user_id == user_id,
-            CalibrationVersionRecord.status == "active",
-            CalibrationVersionRecord.id != version.id,
-        )
+    # 7. Find and supersede current active version with row lock
+    active_stmt = select(CalibrationVersionRecord).where(
+        CalibrationVersionRecord.user_id == user_id,
+        CalibrationVersionRecord.status == "active",
+        CalibrationVersionRecord.id != version.id,
     )
+    if is_pg:
+        active_stmt = active_stmt.with_for_update()
+    active_result = await db.execute(active_stmt)
     previous_active = active_result.scalar_one_or_none()
 
     now = datetime.now(UTC)
@@ -1448,7 +1452,8 @@ async def _rollback_impl(
         validate_version_transition,
     )
 
-    # 1. Find the current ACTIVE version for this user
+    # 1. Find the current ACTIVE version for this user with row lock
+    is_pg = db.bind.dialect.name == "postgresql"
     stmt = (
         sa_select(CalibrationVersionRecord)
         .where(
@@ -1456,6 +1461,8 @@ async def _rollback_impl(
             CalibrationVersionRecord.status == "active",
         )
     )
+    if is_pg:
+        stmt = stmt.with_for_update()
     result = await db.execute(stmt)
     active_version = result.scalar_one_or_none()
 
@@ -1472,7 +1479,7 @@ async def _rollback_impl(
             detail="Active version has no previous version to restore",
         )
 
-    # 2. Find the previous version
+    # 2. Find the previous version with row lock
     prev_stmt = (
         sa_select(CalibrationVersionRecord)
         .where(
@@ -1480,6 +1487,8 @@ async def _rollback_impl(
             CalibrationVersionRecord.version_id == previous_version_id,
         )
     )
+    if is_pg:
+        prev_stmt = prev_stmt.with_for_update()
     prev_result = await db.execute(prev_stmt)
     previous_version = prev_result.scalar_one_or_none()
 
@@ -1505,14 +1514,16 @@ async def _rollback_impl(
     )
 
     rec_stmt = (
-        sa_select(CalibrationRecommendationRecord.status)
+        sa_select(CalibrationRecommendationRecord)
         .where(
             CalibrationRecommendationRecord.user_id == user_id,
             CalibrationRecommendationRecord.calibration_version == previous_version_id,
         )
     )
+    if is_pg:
+        rec_stmt = rec_stmt.with_for_update()
     rec_result = await db.execute(rec_stmt)
-    rec_statuses = [row[0] for row in rec_result.all()]
+    rec_statuses = [row.status for row in rec_result.scalars().all()]
 
     from app.services.calibration_intelligence.state_machine import (
         can_activate_version,
@@ -1578,7 +1589,7 @@ async def _rollback_impl(
     )
     db.add(activated_audit)
 
-    await db.commit()
+    await db.flush()
 
     return RollbackResponse(
         rolled_back=True,
