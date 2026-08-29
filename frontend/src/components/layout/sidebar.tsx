@@ -12,6 +12,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Overview", href: "/", icon: "◉" },
+  { label: "Calibration", href: "/calibration", icon: "📊" },
   { label: "Transactions", href: "/transactions", icon: "⚡", disabled: true },
   { label: "Agents", href: "/agents", icon: "🤖", disabled: true },
   { label: "Policies", href: "/policies", icon: "📋", disabled: true },
