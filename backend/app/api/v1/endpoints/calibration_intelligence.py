@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.models.audit_event import AuditEvent
 from app.models.calibration_recommendation import (
     CalibrationRecommendationRecord,
@@ -28,6 +29,7 @@ from app.models.calibration_recommendation import (
 from app.models.calibration_version import CalibrationVersionRecord
 from app.models.transaction import Transaction
 from app.models.transaction_event import TransactionEvent
+from app.models.user import User
 from app.services.calibration_intelligence.constants import (
     MAX_WINDOW_DAYS,
 )
@@ -214,19 +216,16 @@ class VersionsListResponse(BaseModel):
 )
 async def get_calibration_outcomes(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     window_days: int = Query(default=30, ge=1, le=MAX_WINDOW_DAYS),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
 ) -> OutcomesResponse:
     """Get calibration dataset with eligibility information.
 
     Returns verified outcome samples for calibration analysis.
-    Ownership: only returns transactions belonging to the specified user.
+    Ownership: only returns transactions belonging to the authenticated user.
     """
     try:
-        return await _get_outcomes_impl(db, window_days, user_id)
+        return await _get_outcomes_impl(db, window_days, current_user.id)
     except HTTPException:
         raise
     except Exception as e:
@@ -243,22 +242,19 @@ async def get_calibration_outcomes(
 )
 async def get_calibration_recommendations(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     status: str | None = Query(default=None),
     engine: str | None = Query(default=None),
     version: str | None = Query(default=None),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
 ) -> RecommendationsListResponse:
     """Get calibration recommendations.
 
     Returns advisory recommendations from verified outcome analysis.
-    Ownership: only returns recommendations belonging to the specified user.
+    Ownership: only returns recommendations belonging to the authenticated user.
     """
     try:
         return await _get_recommendations_impl(
-            db, status, engine, version, user_id,
+            db, status, engine, version, current_user.id,
         )
     except HTTPException:
         raise
@@ -278,10 +274,7 @@ async def review_recommendation(
     recommendation_id: str,
     request: ReviewRequest,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> ReviewResponse:
     """Review a calibration recommendation (approve or reject).
 
@@ -292,7 +285,7 @@ async def review_recommendation(
     """
     try:
         return await _review_recommendation_impl(
-            db, recommendation_id, request, user_id,
+            db, recommendation_id, request, current_user.id,
         )
     except HTTPException:
         raise
@@ -312,10 +305,7 @@ async def activate_version(
     version_id: str,
     request: ActivateRequest,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> ActivateResponse:
     """Activate a calibration version.
 
@@ -326,7 +316,7 @@ async def activate_version(
     """
     try:
         return await _activate_version_impl(
-            db, version_id, request, user_id,
+            db, version_id, request, current_user.id,
         )
     except HTTPException:
         raise
@@ -348,10 +338,7 @@ async def activate_version(
 async def generate_calibration(
     request: GenerateRequest,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> GenerateResponse:
     """Generate a calibration version from verified outcomes.
 
@@ -361,7 +348,7 @@ async def generate_calibration(
     """
     try:
         return await _generate_calibration_impl(
-            db, request, user_id,
+            db, request, current_user.id,
         )
     except HTTPException:
         raise
@@ -382,15 +369,12 @@ async def generate_calibration(
 )
 async def list_calibration_versions(
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
     status: str | None = Query(default=None),
 ) -> VersionsListResponse:
     """List calibration versions for the authenticated user."""
     try:
-        return await _list_versions_impl(db, user_id, status)
+        return await _list_versions_impl(db, current_user.id, status)
     except HTTPException:
         raise
     except Exception as e:
@@ -408,14 +392,11 @@ async def list_calibration_versions(
 async def get_calibration_version(
     version_id: str,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> VersionDetailResponse:
     """Get a specific calibration version with its recommendations."""
     try:
-        return await _get_version_impl(db, version_id, user_id)
+        return await _get_version_impl(db, version_id, current_user.id)
     except HTTPException:
         raise
     except Exception as e:
@@ -433,15 +414,12 @@ async def get_calibration_version(
 async def get_calibration_recommendation(
     recommendation_id: str,
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> RecommendationResponse:
     """Get a specific calibration recommendation."""
     try:
         return await _get_recommendation_impl(
-            db, recommendation_id, user_id,
+            db, recommendation_id, current_user.id,
         )
     except HTTPException:
         raise
@@ -1294,10 +1272,7 @@ class EffectiveConfigResponse(BaseModel):
 )
 async def get_effective_config(
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(
-        ...,
-        description="User ID for ownership validation",
-    ),
+    current_user: User = Depends(get_current_user),
 ) -> EffectiveConfigResponse:
     """Get the resolved effective calibration configuration.
 
@@ -1307,7 +1282,7 @@ async def get_effective_config(
     - fail-closed defaults when calibration is invalid
     """
     try:
-        return await _get_effective_config_impl(db, user_id)
+        return await _get_effective_config_impl(db, current_user.id)
     except HTTPException:
         raise
     except Exception as e:
@@ -1368,7 +1343,7 @@ class CalibrationMetricsResponse(BaseModel):
 )
 async def get_calibration_metrics(
     db: AsyncSession = Depends(get_db),
-    user_id: uuid.UUID = Query(..., description="User ID for ownership validation"),
+    current_user: User = Depends(get_current_user),
     limit: int = Query(10000, ge=1, le=50000, description="Max decisions to analyze"),
 ) -> CalibrationMetricsResponse:
     """Get calibration health metrics for a user.
@@ -1380,7 +1355,7 @@ async def get_calibration_metrics(
         compute_calibration_metrics,
     )
 
-    metrics = await compute_calibration_metrics(db, user_id, limit)
+    metrics = await compute_calibration_metrics(db, current_user.id, limit)
     return CalibrationMetricsResponse(
         total_decisions=metrics.total_decisions,
         calibration_active_count=metrics.calibration_active_count,
@@ -1398,7 +1373,6 @@ async def get_calibration_metrics(
 class RollbackRequest(BaseModel):
     """Request to rollback the active calibration version."""
 
-    user_id: uuid.UUID
     confirm: bool = Field(
         default=False,
         description="Must be true to execute rollback",
@@ -1421,6 +1395,7 @@ class RollbackResponse(BaseModel):
 async def rollback_calibration(
     request: RollbackRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> RollbackResponse:
     """Rollback the currently ACTIVE calibration to its previous version.
 
@@ -1436,7 +1411,7 @@ async def rollback_calibration(
             detail="confirm=true is required for rollback",
         )
 
-    return await _rollback_impl(db, request.user_id)
+    return await _rollback_impl(db, current_user.id)
 
 
 async def _rollback_impl(

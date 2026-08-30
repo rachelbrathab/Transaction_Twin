@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.identity import get_current_user
 from app.main import app
 from app.models.calibration_version import CalibrationVersionRecord
 
@@ -322,14 +323,21 @@ class TestRuntimeConfigEndpoint:
                 async with factory() as session:
                     yield session
 
+            class _FakeUser:
+                def __init__(self, uid):
+                    self.id = uid
+
+            async def _override_identity():
+                return _FakeUser(uuid.uuid4())
+
             app.dependency_overrides[get_db] = _override_get_db
+            app.dependency_overrides[get_current_user] = _override_identity
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://testserver",
             ) as client:
                 resp = await client.get(
                     "/analytics/calibration/effective-config",
-                    params={"user_id": str(uuid.uuid4())},
                 )
                 assert resp.status_code == 200
                 data = resp.json()
@@ -362,14 +370,21 @@ class TestRuntimeConfigEndpoint:
                 async with factory() as session:
                     yield session
 
+            class _FakeUser:
+                def __init__(self, uid):
+                    self.id = uid
+
+            async def _override_identity():
+                return _FakeUser(user_id)
+
             app.dependency_overrides[get_db] = _override_get_db
+            app.dependency_overrides[get_current_user] = _override_identity
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://testserver",
             ) as client:
                 resp = await client.get(
                     "/analytics/calibration/effective-config",
-                    params={"user_id": str(user_id)},
                 )
                 assert resp.status_code == 200
                 data = resp.json()
@@ -381,7 +396,7 @@ class TestRuntimeConfigEndpoint:
             app.dependency_overrides.clear()
             await _teardown_engine(engine)
 
-    async def test_requires_user_id(self):
+    async def test_requires_identity(self):
         engine = await _setup_engine()
         try:
             factory = async_sessionmaker(
@@ -392,6 +407,7 @@ class TestRuntimeConfigEndpoint:
                     yield session
 
             app.dependency_overrides[get_db] = _override_get_db
+            # Do NOT override get_current_user — test the real dependency
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://testserver",
@@ -399,7 +415,7 @@ class TestRuntimeConfigEndpoint:
                 resp = await client.get(
                     "/analytics/calibration/effective-config",
                 )
-                assert resp.status_code == 422
+                assert resp.status_code == 401
         finally:
             app.dependency_overrides.clear()
             await _teardown_engine(engine)
@@ -427,15 +443,22 @@ class TestRuntimeConfigEndpoint:
                 async with factory() as session:
                     yield session
 
+            class _FakeUser:
+                def __init__(self, uid):
+                    self.id = uid
+
+            async def _override_identity():
+                return _FakeUser(user_a)
+
             app.dependency_overrides[get_db] = _override_get_db
+            app.dependency_overrides[get_current_user] = _override_identity
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://testserver",
             ) as client:
-                # User A should see defaults, not User B's calibration
+                # Authenticated as user_a should see defaults, not user_b's calibration
                 resp = await client.get(
                     "/analytics/calibration/effective-config",
-                    params={"user_id": str(user_a)},
                 )
                 assert resp.status_code == 200
                 data = resp.json()

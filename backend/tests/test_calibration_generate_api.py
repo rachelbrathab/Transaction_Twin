@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.identity import get_current_user
 from app.main import app
 from app.models.calibration_recommendation import (
     CalibrationRecommendationRecord,
@@ -28,6 +29,17 @@ from app.models.calibration_version import CalibrationVersionRecord
 
 USER_A = uuid.uuid4()
 USER_B = uuid.uuid4()
+
+_active_user_id: uuid.UUID = USER_A
+
+
+class _FakeUser:
+    def __init__(self, uid: uuid.UUID) -> None:
+        self.id = uid
+
+
+async def _override_get_current_user():
+    return _FakeUser(_active_user_id)
 
 
 async def _make_client(engine):
@@ -45,6 +57,7 @@ async def _make_client(engine):
                 raise
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = _override_get_current_user
     transport = ASGITransport(app=app)
     client = AsyncClient(transport=transport, base_url="http://test")
     return client, factory
@@ -122,15 +135,16 @@ async def _teardown_engine(engine):
 
 class TestGenerateEndpoint:
     @pytest.mark.asyncio
-    async def test_generate_missing_user_id(self):
+    async def test_generate_missing_identity(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
                 "/analytics/calibration/generate",
                 json={"window_days": 30},
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -143,7 +157,7 @@ class TestGenerateEndpoint:
         try:
             resp = await client.post(
                 "/analytics/calibration/generate",
-                params={"user_id": str(USER_A)},
+
                 json={"window_days": 30},
             )
             assert resp.status_code == 200
@@ -162,14 +176,15 @@ class TestGenerateEndpoint:
 
 class TestVersionListing:
     @pytest.mark.asyncio
-    async def test_list_versions_missing_user_id(self):
+    async def test_list_versions_missing_identity(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
                 "/analytics/calibration/versions",
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -182,7 +197,7 @@ class TestVersionListing:
         try:
             resp = await client.get(
                 "/analytics/calibration/versions",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -207,7 +222,7 @@ class TestVersionListing:
 
             resp = await client.get(
                 "/analytics/calibration/versions",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -233,7 +248,7 @@ class TestVersionListing:
 
             resp = await client.get(
                 "/analytics/calibration/versions",
-                params={"user_id": str(USER_A)},
+
             )
             data = resp.json()
             assert data["total"] == 1
@@ -286,7 +301,7 @@ class TestVersionDetail:
         try:
             resp = await client.get(
                 "/analytics/calibration/versions/nonexistent",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 404
         finally:
@@ -311,7 +326,7 @@ class TestVersionDetail:
 
             resp = await client.get(
                 "/analytics/calibration/versions/v1",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -335,12 +350,15 @@ class TestVersionDetail:
                 )
                 await session.commit()
 
+            # Authenticate as USER_B trying to access USER_A's version
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.get(
                 "/analytics/calibration/versions/v1",
-                params={"user_id": str(USER_B)},
             )
             assert resp.status_code == 404
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -360,7 +378,7 @@ class TestRecommendationDetail:
             resp = await client.get(
                 f"/analytics/calibration/"
                 f"recommendations/{uuid.uuid4()}",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 404
         finally:
@@ -381,7 +399,7 @@ class TestRecommendationDetail:
             resp = await client.get(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -404,13 +422,16 @@ class TestRecommendationDetail:
                 rec_id = str(rec.id)
                 await session.commit()
 
+            # Authenticate as USER_B trying to access USER_A's recommendation
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.get(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}",
-                params={"user_id": str(USER_B)},
             )
             assert resp.status_code == 404
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -507,12 +528,16 @@ class TestIdempotency:
 
             resp_a = await client.get(
                 "/analytics/calibration/versions",
-                params={"user_id": str(USER_A)},
             )
+
+            # Switch identity to USER_B
+            global _active_user_id
+            _active_user_id = USER_B
             resp_b = await client.get(
                 "/analytics/calibration/versions",
-                params={"user_id": str(USER_B)},
             )
+
+            _active_user_id = USER_A
             assert resp_a.json()["total"] == 1
             assert resp_a.json()["versions"][0]["version_id"] == "v-a1"
             assert resp_b.json()["total"] == 1

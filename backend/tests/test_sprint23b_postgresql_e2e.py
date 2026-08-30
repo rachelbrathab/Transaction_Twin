@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.main import app
 from app.models.audit_event import AuditEvent
 from app.models.calibration_recommendation import (
@@ -35,6 +36,7 @@ PG_URL = "postgresql+asyncpg://postgres@127.0.0.1:5432/sprint23b_test"
 
 USER_A = uuid.uuid4()
 USER_B = uuid.uuid4()
+_active_user_id: uuid.UUID = USER_A
 
 
 # ── Fixtures ────────────────────────────────────────────────
@@ -79,6 +81,16 @@ async def client(pg_engine):
                 raise
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # Identity override: reads from a module-level variable
+    class _FakeUser:
+        def __init__(self, uid):
+            self.id = uid
+
+    async def override_get_current_user():
+        return _FakeUser(_active_user_id)
+
+    app.dependency_overrides[get_current_user] = override_get_current_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
@@ -310,7 +322,6 @@ class TestEndToEndLifecycle:
     ):
         """List versions and get detail endpoint against PostgreSQL."""
         await _seed_user(pg_engine, USER_A)
-        uid = str(USER_A)
 
         async with pg_factory() as s:
             await _make_version(
@@ -321,7 +332,7 @@ class TestEndToEndLifecycle:
 
         # List versions
         resp = await client.get(
-            f"/analytics/calibration/versions?user_id={uid}",
+            "/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -330,8 +341,7 @@ class TestEndToEndLifecycle:
 
         # Get version detail
         resp = await client.get(
-            f"/analytics/calibration/versions/cal-list-v1"
-            f"?user_id={uid}",
+            "/analytics/calibration/versions/cal-list-v1",
         )
         assert resp.status_code == 200
         detail = resp.json()
@@ -432,8 +442,10 @@ class TestOwnershipIsolation:
             await s.commit()
 
         # User A lists — only sees cal-scope-a
+        global _active_user_id
+        _active_user_id = USER_A
         resp = await client.get(
-            f"/analytics/calibration/versions?user_id={USER_A}",
+            "/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         vids = [v["version_id"] for v in resp.json()["versions"]]
@@ -441,13 +453,16 @@ class TestOwnershipIsolation:
         assert "cal-scope-b" not in vids
 
         # User B lists — only sees cal-scope-b
+        _active_user_id = USER_B
         resp = await client.get(
-            f"/analytics/calibration/versions?user_id={USER_B}",
+            "/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         vids = [v["version_id"] for v in resp.json()["versions"]]
         assert "cal-scope-b" in vids
         assert "cal-scope-a" not in vids
+
+        _active_user_id = USER_A
 
 
 # ═══════════════════════════════════════════════════════════

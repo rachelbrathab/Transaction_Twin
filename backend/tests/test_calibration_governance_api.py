@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.identity import get_current_user
 from app.main import app
 from app.models.audit_event import AuditEvent
 from app.models.calibration_recommendation import (
@@ -31,6 +32,21 @@ from app.models.calibration_version import CalibrationVersionRecord
 
 USER_A = uuid.uuid4()
 USER_B = uuid.uuid4()
+
+# Module-level mutable to control which user the identity dependency returns.
+_active_user_id: uuid.UUID = USER_A
+
+
+class _FakeUser:
+    """Minimal user object returned by the identity override."""
+
+    def __init__(self, uid: uuid.UUID) -> None:
+        self.id = uid
+
+
+async def _override_get_current_user():
+    """Return a fake user for the current _active_user_id."""
+    return _FakeUser(_active_user_id)
 
 
 async def _make_client(engine):
@@ -49,6 +65,7 @@ async def _make_client(engine):
                 raise
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = _override_get_current_user
     transport = ASGITransport(app=app)
     client = AsyncClient(transport=transport, base_url="http://test")
     return client, factory
@@ -130,14 +147,16 @@ async def _teardown_engine(engine):
 
 class TestOutcomesOwnership:
     @pytest.mark.asyncio
-    async def test_missing_user_id_returns_422(self):
+    async def test_missing_identity_returns_401(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            # Remove identity override to test the real dependency
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
                 "/analytics/calibration/outcomes",
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -166,14 +185,15 @@ class TestOutcomesOwnership:
 
 class TestRecommendationsOwnership:
     @pytest.mark.asyncio
-    async def test_missing_user_id_returns_422(self):
+    async def test_missing_identity_returns_401(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
                 "/analytics/calibration/recommendations",
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -189,7 +209,7 @@ class TestRecommendationsOwnership:
                 await session.commit()
             resp = await client.get(
                 "/analytics/calibration/recommendations",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -212,7 +232,7 @@ class TestRecommendationsOwnership:
                 await session.commit()
             resp = await client.get(
                 "/analytics/calibration/recommendations",
-                params={"user_id": str(USER_A)},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -225,16 +245,17 @@ class TestRecommendationsOwnership:
 
 class TestReviewOwnership:
     @pytest.mark.asyncio
-    async def test_missing_user_id_returns_422(self):
+    async def test_missing_identity_returns_401(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
                 "/analytics/calibration/"
                 "recommendations/some-id/review",
                 json={"action": "approve"},
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -250,7 +271,7 @@ class TestReviewOwnership:
             resp = await client.post(
                 "/analytics/calibration/"
                 f"recommendations/{uuid.uuid4()}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 404
@@ -262,16 +283,17 @@ class TestReviewOwnership:
 
 class TestActivationOwnership:
     @pytest.mark.asyncio
-    async def test_missing_user_id_returns_422(self):
+    async def test_missing_identity_returns_401(self):
         engine = await _setup_engine()
         client, _ = await _make_client(engine)
         try:
+            app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
                 "/analytics/calibration/"
                 "versions/some-id/activate",
                 json={"confirm": True},
             )
-            assert resp.status_code == 422
+            assert resp.status_code == 401
         finally:
             await client.aclose()
             await _cleanup()
@@ -285,7 +307,7 @@ class TestActivationOwnership:
             resp = await client.post(
                 "/analytics/calibration/"
                 f"versions/{uuid.uuid4()}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 404
@@ -317,7 +339,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -344,7 +366,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={
                     "action": "reject",
                     "reason": "Not enough evidence",
@@ -373,7 +395,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -398,7 +420,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "reject"},
             )
             assert resp.status_code == 200
@@ -423,7 +445,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 409
@@ -447,7 +469,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 409
@@ -470,14 +492,17 @@ class TestReviewStateMachine:
                 await session.commit()
                 rec_id = str(rec.id)
 
+            # Authenticate as USER_B trying to review USER_A's recommendation
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_B)},
                 json={"action": "approve"},
             )
             assert resp.status_code == 403
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -497,7 +522,7 @@ class TestReviewStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "bogus"},
             )
             assert resp.status_code == 422
@@ -529,7 +554,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 200
@@ -564,7 +589,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 409
@@ -589,7 +614,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 200
@@ -614,7 +639,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": False},
             )
             assert resp.status_code == 422
@@ -639,7 +664,7 @@ class TestActivationStateMachine:
             resp1 = await client.post(
                 "/analytics/calibration/"
                 "versions/v1/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp1.status_code == 200
@@ -655,7 +680,7 @@ class TestActivationStateMachine:
             resp2 = await client.post(
                 "/analytics/calibration/"
                 "versions/v2/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp2.status_code == 200
@@ -690,14 +715,17 @@ class TestActivationStateMachine:
                 vid = ver.version_id
                 await session.commit()
 
+            # Authenticate as USER_B trying to activate USER_A's version
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_B)},
                 json={"confirm": True},
             )
             assert resp.status_code == 403
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -722,7 +750,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 409
@@ -751,7 +779,7 @@ class TestActivationStateMachine:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp.status_code == 200
@@ -783,7 +811,7 @@ class TestIdempotency:
             resp1 = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp1.status_code == 200
@@ -792,7 +820,7 @@ class TestIdempotency:
             resp2 = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             assert resp2.status_code == 200
@@ -819,7 +847,7 @@ class TestIdempotency:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -852,13 +880,13 @@ class TestDataIntegrity:
             await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
 
@@ -899,7 +927,7 @@ class TestDataIntegrity:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={
                     "action": "reject",
                     "reason": "Insufficient evidence",
@@ -946,7 +974,7 @@ class TestDataIntegrity:
             await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -989,7 +1017,7 @@ class TestDataIntegrity:
             await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -1032,7 +1060,7 @@ class TestAuditEvents:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -1070,7 +1098,7 @@ class TestAuditEvents:
             await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -1114,13 +1142,13 @@ class TestAuditEvents:
             await client.post(
                 "/analytics/calibration/"
                 "versions/v1/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             await client.post(
                 "/analytics/calibration/"
                 "versions/v2/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -1205,16 +1233,19 @@ class TestSecurity:
                 rec_id = str(rec.id)
                 await session.commit()
 
+            # Authenticate as USER_B trying to review USER_A's recommendation
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_B)},
                 json={"action": "approve"},
             )
             assert resp.status_code == 403
             body = resp.json()
             assert "rationale" not in body
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -1233,14 +1264,17 @@ class TestSecurity:
                 vid = ver.version_id
                 await session.commit()
 
+            # Authenticate as USER_B trying to activate USER_A's version
+            global _active_user_id
+            _active_user_id = USER_B
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_B)},
                 json={"confirm": True},
             )
             assert resp.status_code == 403
         finally:
+            _active_user_id = USER_A
             await client.aclose()
             await _cleanup()
             await _teardown_engine(engine)
@@ -1259,7 +1293,7 @@ class TestRecommendationsListing:
         try:
             resp = await client.get(
                 "/analytics/calibration/recommendations",
-                params={"user_id": str(uuid.uuid4())},
+
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -1290,7 +1324,7 @@ class TestRecommendationsListing:
 
             resp = await client.get(
                 "/analytics/calibration/recommendations",
-                params={"user_id": str(USER_A)},
+
             )
             data = resp.json()
             assert data["total"] == 1
@@ -1396,7 +1430,7 @@ class TestAuditMetadata:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -1434,7 +1468,7 @@ class TestAuditMetadata:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -1472,7 +1506,7 @@ class TestAuditMetadata:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "reject", "reason": "No"},
             )
             assert resp.status_code == 200
@@ -1510,7 +1544,7 @@ class TestAuditMetadata:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "reject"},
             )
             assert resp.status_code == 200
@@ -1549,7 +1583,7 @@ class TestAuditMetadata:
             await client.post(
                 f"/analytics/calibration/"
                 f"versions/{vid}/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -1593,13 +1627,13 @@ class TestAuditMetadata:
             await client.post(
                 "/analytics/calibration/"
                 "versions/v1/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
             await client.post(
                 "/analytics/calibration/"
                 "versions/v2/activate",
-                params={"user_id": str(USER_A)},
+
                 json={"confirm": True},
             )
 
@@ -1644,7 +1678,7 @@ class TestGovernanceTimestamps:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -1686,7 +1720,7 @@ class TestGovernanceTimestamps:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "approve"},
             )
             assert resp.status_code == 200
@@ -1727,7 +1761,7 @@ class TestGovernanceTimestamps:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={
                     "action": "reject",
                     "reason": "Insufficient evidence",
@@ -1773,7 +1807,7 @@ class TestGovernanceTimestamps:
             resp = await client.post(
                 f"/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
-                params={"user_id": str(USER_A)},
+
                 json={"action": "reject"},
             )
             assert resp.status_code == 200

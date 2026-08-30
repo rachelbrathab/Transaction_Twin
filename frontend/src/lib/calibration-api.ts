@@ -2,7 +2,8 @@
  * Calibration Intelligence API client.
  *
  * All calls go through /api/v1/analytics/calibration/*.
- * user_id is required by the backend for ownership scoping.
+ * Authentication identity is resolved server-side from the trusted
+ * reverse-proxy header — the frontend never sends user_id.
  */
 
 import { apiGet, apiPost } from "./api";
@@ -22,105 +23,82 @@ import type {
 const BASE = "/analytics/calibration";
 
 export async function listVersions(
-  userId: string,
   status?: string,
 ): Promise<VersionsListResponse> {
-  const params = new URLSearchParams({ user_id: userId });
+  const params = new URLSearchParams();
   if (status) params.set("status", status);
-  return apiGet<VersionsListResponse>(`${BASE}/versions?${params}`);
+  const qs = params.toString();
+  return apiGet<VersionsListResponse>(`${BASE}/versions${qs ? `?${qs}` : ""}`);
 }
 
 export async function getVersion(
-  userId: string,
   versionId: string,
 ): Promise<VersionDetailResponse> {
-  const params = new URLSearchParams({ user_id: userId });
   return apiGet<VersionDetailResponse>(
-    `${BASE}/versions/${versionId}?${params}`,
+    `${BASE}/versions/${versionId}`,
   );
 }
 
 export async function getRecommendations(
-  userId: string,
   opts?: { status?: string; engine?: string; version?: string },
 ): Promise<RecommendationsListResponse> {
-  const params = new URLSearchParams({ user_id: userId });
+  const params = new URLSearchParams();
   if (opts?.status) params.set("status", opts.status);
   if (opts?.engine) params.set("engine", opts.engine);
   if (opts?.version) params.set("version", opts.version);
+  const qs = params.toString();
   return apiGet<RecommendationsListResponse>(
-    `${BASE}/recommendations?${params}`,
+    `${BASE}/recommendations${qs ? `?${qs}` : ""}`,
   );
 }
 
 export async function getRecommendation(
-  userId: string,
   recommendationId: string,
 ): Promise<RecommendationResponse> {
-  const params = new URLSearchParams({ user_id: userId });
   return apiGet<RecommendationResponse>(
-    `${BASE}/recommendations/${recommendationId}?${params}`,
+    `${BASE}/recommendations/${recommendationId}`,
   );
 }
 
 export async function reviewRecommendation(
-  userId: string,
   recommendationId: string,
   action: "approve" | "reject",
   reason?: string,
 ): Promise<ReviewResponse> {
-  const params = new URLSearchParams({ user_id: userId });
   return apiPost<ReviewResponse>(
-    `${BASE}/recommendations/${recommendationId}/review?${params}`,
+    `${BASE}/recommendations/${recommendationId}/review`,
     { action, reason: reason ?? null },
   );
 }
 
 export async function generateCalibration(
-  userId: string,
   windowDays: number = 30,
 ): Promise<GenerateResponse> {
-  const params = new URLSearchParams({ user_id: userId });
   return apiPost<GenerateResponse>(
-    `${BASE}/generate?${params}`,
+    `${BASE}/generate`,
     { window_days: windowDays },
   );
 }
 
 export async function activateVersion(
-  userId: string,
   versionId: string,
 ): Promise<ActivateResponse> {
-  const params = new URLSearchParams({ user_id: userId });
   return apiPost<ActivateResponse>(
-    `${BASE}/versions/${versionId}/activate?${params}`,
+    `${BASE}/versions/${versionId}/activate`,
     { confirm: true },
   );
 }
 
-export async function rollbackCalibration(
-  userId: string,
-): Promise<RollbackResponse> {
+export async function rollbackCalibration(): Promise<RollbackResponse> {
   return apiPost<RollbackResponse>(`${BASE}/rollback`, {
-    user_id: userId,
     confirm: true,
   });
 }
 
-export async function getEffectiveConfig(
-  userId: string,
-): Promise<EffectiveConfigResponse> {
-  const params = new URLSearchParams({ user_id: userId });
-  return apiGet<EffectiveConfigResponse>(
-    `${BASE}/effective-config?${params}`,
-  );
+export async function getEffectiveConfig(): Promise<EffectiveConfigResponse> {
+  return apiGet<EffectiveConfigResponse>(`${BASE}/effective-config`);
 }
 
-export async function getCalibrationMetrics(
-  userId: string,
-): Promise<CalibrationMetricsResponse> {
-  const params = new URLSearchParams({ user_id: userId });
-  return apiGet<CalibrationMetricsResponse>(
-    `${BASE}/metrics?${params}`,
-  );
+export async function getCalibrationMetrics(): Promise<CalibrationMetricsResponse> {
+  return apiGet<CalibrationMetricsResponse>(`${BASE}/metrics`);
 }

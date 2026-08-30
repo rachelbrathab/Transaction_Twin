@@ -36,8 +36,6 @@ import type {
   CalibrationMetricsResponse,
 } from "@/types/api";
 
-const USER_ID = "00000000-0000-0000-0000-000000000001";
-
 type Tab = "versions" | "recommendations" | "config" | "metrics";
 
 export default function CalibrationPage() {
@@ -72,10 +70,10 @@ export default function CalibrationPage() {
     let cancelled = false;
     async function load() {
       const [v, r, c, m] = await Promise.allSettled([
-        listVersions(USER_ID),
-        getRecommendations(USER_ID),
-        getEffectiveConfig(USER_ID),
-        getCalibrationMetrics(USER_ID),
+        listVersions(),
+        getRecommendations(),
+        getEffectiveConfig(),
+        getCalibrationMetrics(),
       ]);
       if (cancelled) return;
       setLoading(false);
@@ -93,10 +91,10 @@ export default function CalibrationPage() {
     setLoading(true);
     setError(null);
     const [v, r, c, m] = await Promise.allSettled([
-      listVersions(USER_ID),
-      getRecommendations(USER_ID),
-      getEffectiveConfig(USER_ID),
-      getCalibrationMetrics(USER_ID),
+      listVersions(),
+      getRecommendations(),
+      getEffectiveConfig(),
+      getCalibrationMetrics(),
     ]);
     setLoading(false);
     if (v.status === "fulfilled") setVersions(v.value.versions);
@@ -109,7 +107,7 @@ export default function CalibrationPage() {
   const handleViewDetail = useCallback(
     async (versionId: string) => {
       try {
-        const detail = await getVersion(USER_ID, versionId);
+        const detail = await getVersion(versionId);
         setSelectedVersion(detail);
       } catch (err) {
         setActionMessage({
@@ -126,7 +124,7 @@ export default function CalibrationPage() {
       setActivating(versionId);
       setActionMessage(null);
       try {
-        const res = await activateVersion(USER_ID, versionId);
+        const res = await activateVersion(versionId);
         setActionMessage({
           type: "success",
           text: `Activated ${res.version_id}${res.idempotent ? " (already active)" : ""}`,
@@ -148,7 +146,7 @@ export default function CalibrationPage() {
   const handleRollback = useCallback(async () => {
     setActionMessage(null);
     try {
-      const res = await rollbackCalibration(USER_ID);
+      const res = await rollbackCalibration();
       setActionMessage({
         type: "success",
         text: res.message,
@@ -170,7 +168,6 @@ export default function CalibrationPage() {
       setActionMessage(null);
       try {
         const res = await reviewRecommendation(
-          USER_ID,
           recommendationId,
           action,
         );
@@ -198,7 +195,7 @@ export default function CalibrationPage() {
     setGenerating(true);
     setActionMessage(null);
     try {
-      const res = await generateCalibration(USER_ID);
+      const res = await generateCalibration();
       setActionMessage({
         type: "success",
         text: `Generated ${res.version_id} (${res.recommendation_count} recommendations)`,
