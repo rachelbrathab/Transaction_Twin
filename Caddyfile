@@ -34,14 +34,6 @@
         }
     }
 
-    # ── Auth endpoints ──────────────────────────────────────────
-    handle /auth/* {
-        reverse_proxy backend:8000 {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-        }
-    }
-
     # ── Health endpoint (backend) ───────────────────────────────
     handle /health {
         reverse_proxy backend:8000

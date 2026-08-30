@@ -44,6 +44,28 @@ export function isAuthenticated(): boolean {
   return _accessToken !== null;
 }
 
+// ── Logout ───────────────────────────────────────────────────────
+
+export async function logout(): Promise<void> {
+  // Call the backend to revoke the refresh token and clear the cookie.
+  // Always clear the in-memory access token regardless of backend response.
+  try {
+    const url = `${API_BASE_URL}${API_V1_PREFIX}/auth/logout`;
+    await fetch(url, {
+      method: "POST",
+      credentials: "include", // Send HttpOnly refresh token cookie
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+  } catch {
+    // Backend unavailable — token still cleared below
+  } finally {
+    clearStoredToken();
+  }
+}
+
 // Prevent infinite refresh loops
 let _isRefreshing = false;
 let _refreshPromise: Promise<boolean> | null = null;

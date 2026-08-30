@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { clearStoredToken, isAuthenticated } from "@/lib/api";
+import { logout, isAuthenticated } from "@/lib/api";
 import { StatusIndicator } from "@/components/ui/status-indicator";
 
 export function Header() {
@@ -9,8 +9,10 @@ export function Header() {
   const authed = isAuthenticated();
 
   function handleLogout() {
-    clearStoredToken();
-    router.push("/login");
+    // Call backend logout to revoke refresh token, then clear client state
+    logout().finally(() => {
+      router.push("/login");
+    });
   }
 
   return (

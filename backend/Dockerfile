@@ -17,7 +17,7 @@ COPY pyproject.toml ./
 # Install dependencies into a virtual environment
 RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -e ".[dev]"
+    /opt/venv/bin/pip install --no-cache-dir -e .
 
 # ── Stage 2: Production ────────────────────────────────────────────
 FROM python:3.12-slim AS production
