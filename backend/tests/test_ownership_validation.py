@@ -4,6 +4,7 @@ Verifies that User A cannot access, modify, or view transactions belonging to Us
 
 Strategy: All tests use the TestClient which shares the app's database engine.
 Test data is created via the app's own get_db session to ensure visibility.
+Authentication is provided via JWT tokens in the Authorization header.
 """
 
 import uuid
@@ -13,8 +14,36 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.auth import create_access_token
 from app.core.database import Base, get_db
+from app.core.identity import get_current_user
 from app.main import app
+
+
+def _auth_headers(user_id: str) -> dict[str, str]:
+    """Create Authorization headers for a given user ID."""
+    token = create_access_token(uuid.UUID(user_id))
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _make_user_override(user_id: str, session_factory):
+    """Create a get_current_user override that returns a specific user from the DB."""
+
+    async def _override():
+        from sqlalchemy import select as sa_select
+
+        from app.models.user import User
+
+        async with session_factory() as session:
+            result = await session.execute(
+                sa_select(User).where(User.id == uuid.UUID(user_id))
+            )
+            user = result.scalar_one_or_none()
+            if user is None:
+                raise RuntimeError(f"Test user {user_id} not found in database")
+            return user
+
+    return _override
 
 
 async def _create_test_data(session: AsyncSession):
@@ -101,13 +130,35 @@ async def _create_test_data(session: AsyncSession):
     }
 
 
+def _setup_overrides(session_factory):
+    """Set up get_db override and return helper to also override get_current_user."""
+
+    async def _override_get_db():
+        async with session_factory() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = _override_get_db
+
+    def set_auth(user_id: str):
+        app.dependency_overrides[get_current_user] = _make_user_override(user_id, session_factory)
+
+    def clear():
+        app.dependency_overrides.clear()
+
+    return set_auth, clear
+
+
 @pytest.mark.asyncio
 class TestOutcomeOwnership:
     """POST /transactions/{id}/outcomes ownership validation."""
 
     async def test_owner_can_submit_own_outcome(self):
         """Owner can submit an outcome for their own transaction."""
-        # Create a dedicated engine and seed data
         engine = create_async_engine("sqlite+aiosqlite://", echo=False)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -117,22 +168,13 @@ class TestOutcomeOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        # Override get_db to use this engine
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_a_id']}/outcomes?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_a_id']}/outcomes",
                     json={
                         "event_type": "payment_initiated",
                         "source": "payment_provider",
@@ -144,7 +186,7 @@ class TestOutcomeOwnership:
                 body = response.json()
                 assert body["transaction_id"] == data["txn_a_id"]
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_outcome_rejected(self):
@@ -158,21 +200,13 @@ class TestOutcomeOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_id']}/outcomes",
                     json={
                         "event_type": "payment_success",
                         "source": "payment_provider",
@@ -182,7 +216,7 @@ class TestOutcomeOwnership:
                 )
                 assert response.status_code == 403
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_outcome_no_event_created(self):
@@ -196,21 +230,13 @@ class TestOutcomeOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
 
@@ -225,7 +251,7 @@ class TestOutcomeOwnership:
                 events = result.scalars().all()
                 assert len(events) == 0
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_outcome_no_leak(self):
@@ -239,28 +265,20 @@ class TestOutcomeOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
                 assert response.status_code == 403
                 body_str = str(response.json())
                 assert data["txn_b_id"] not in body_str
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_nonexistent_transaction_404(self):
@@ -274,31 +292,23 @@ class TestOutcomeOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 fake_id = str(uuid.uuid4())
                 response = await client.post(
-                    f"/transactions/{fake_id}/outcomes?user_id={data['user_a_id']}",
+                    f"/transactions/{fake_id}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
                 assert response.status_code == 404
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
-    async def test_missing_user_id_rejected(self):
-        """Endpoint requires user_id parameter."""
+    async def test_unauthenticated_rejected(self):
+        """Endpoint requires authentication."""
         engine = create_async_engine("sqlite+aiosqlite://", echo=False)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -325,7 +335,7 @@ class TestOutcomeOwnership:
                     f"/transactions/{data['txn_a_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
-                assert response.status_code == 422
+                assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
             await engine.dispose()
@@ -346,21 +356,13 @@ class TestReviewOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_b_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review?user_id={data['user_b_id']}",
+                    f"/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Looks good", "actor_id": "reviewer-1"},
                 )
                 assert response.status_code == 200
@@ -368,7 +370,7 @@ class TestReviewOwnership:
                 assert body["action"] == "approve"
                 assert body["override_status"] == "approved"
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_review_rejected(self):
@@ -382,26 +384,18 @@ class TestReviewOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Unauthorized"},
                 )
                 assert response.status_code == 403
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_review_no_override(self):
@@ -415,21 +409,13 @@ class TestReviewOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Unauthorized"},
                 )
 
@@ -444,7 +430,7 @@ class TestReviewOwnership:
                 decision = result.scalar_one()
                 assert decision.override_status is None
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_review_no_status_change(self):
@@ -458,21 +444,13 @@ class TestReviewOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve"},
                 )
 
@@ -485,7 +463,7 @@ class TestReviewOwnership:
                 txn = result.scalar_one()
                 assert txn.status == "decided"
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
 
@@ -504,27 +482,19 @@ class TestHistoryOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_a_id']}/history?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_a_id']}/history",
                 )
                 assert response.status_code == 200
                 body = response.json()
                 assert body["transaction_id"] == data["txn_a_id"]
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_history_rejected(self):
@@ -538,25 +508,17 @@ class TestHistoryOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_b_id']}/history?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_id']}/history",
                 )
                 assert response.status_code == 403
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_cross_user_history_no_details(self):
@@ -570,27 +532,19 @@ class TestHistoryOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_b_id']}/history?user_id={data['user_a_id']}",
+                    f"/transactions/{data['txn_b_id']}/history",
                 )
                 assert response.status_code == 403
                 body_str = str(response.json())
                 assert data["txn_b_id"] not in body_str
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
     async def test_nonexistent_transaction_404(self):
@@ -604,30 +558,22 @@ class TestHistoryOwnership:
             data = await _create_test_data(session)
             await session.commit()
 
-        async def _override_get_db():
-            async with session_factory() as s:
-                try:
-                    yield s
-                    await s.commit()
-                except Exception:
-                    await s.rollback()
-                    raise
-
-        app.dependency_overrides[get_db] = _override_get_db
+        set_auth, clear = _setup_overrides(session_factory)
         try:
+            set_auth(data["user_a_id"])
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 fake_id = str(uuid.uuid4())
                 response = await client.get(
-                    f"/transactions/{fake_id}/history?user_id={data['user_a_id']}",
+                    f"/transactions/{fake_id}/history",
                 )
                 assert response.status_code == 404
         finally:
-            app.dependency_overrides.clear()
+            clear()
             await engine.dispose()
 
-    async def test_missing_user_id_rejected(self):
-        """Endpoint requires user_id parameter."""
+    async def test_unauthenticated_rejected(self):
+        """Endpoint requires authentication."""
         engine = create_async_engine("sqlite+aiosqlite://", echo=False)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -653,7 +599,7 @@ class TestHistoryOwnership:
                 response = await client.get(
                     f"/transactions/{data['txn_a_id']}/history",
                 )
-                assert response.status_code == 422
+                assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
             await engine.dispose()

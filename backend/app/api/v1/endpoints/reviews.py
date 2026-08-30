@@ -9,16 +9,18 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.models.audit_event import AuditEvent
 from app.models.decision import Decision
 from app.models.transaction import Transaction
 from app.models.transaction_event import TransactionEvent
+from app.models.user import User
 from app.services.outcome_engine.models import OutcomeEventType
 
 logger = structlog.get_logger()
@@ -66,7 +68,7 @@ class ReviewResponse(BaseModel):
 async def review_transaction(
     transaction_id: uuid.UUID,
     request: ReviewRequest,
-    user_id: uuid.UUID = Query(..., description="User ID for ownership validation"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReviewResponse:
     """Approve or reject a transaction with REVIEW decision.
@@ -75,7 +77,7 @@ async def review_transaction(
     can be reviewed.
     """
     try:
-        return await _review_transaction_impl(transaction_id, request, user_id, db)
+        return await _review_transaction_impl(transaction_id, request, current_user.id, db)
     except HTTPException:
         raise
     except Exception as e:

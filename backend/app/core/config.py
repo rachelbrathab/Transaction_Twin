@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
 
+    # Authentication
+    jwt_secret_key: str = "dev-only-insecure-key-must-override-in-production-19ad87"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60
+
     @property
     def is_development(self) -> bool:
         return self.app_env == "development"

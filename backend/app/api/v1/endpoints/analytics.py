@@ -17,11 +17,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.models.agent import Agent
 from app.models.audit_event import AuditEvent
 from app.models.decision import Decision
 from app.models.intent import Intent
 from app.models.policy import Policy
+from app.models.user import User
 from app.services.calibration_engine.constants import (
     MAX_DECISIONS,
     MAX_HISTORY_DAYS,
@@ -58,8 +60,8 @@ class CalibrationResponse(BaseModel):
 @router.get("/analytics/calibration", response_model=CalibrationResponse)
 async def get_calibration(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     window_days: int = Query(default=30, ge=1, le=90),
-    user_id: uuid.UUID | None = Query(default=None),
     agent_id: uuid.UUID | None = Query(default=None),
     policy_id: uuid.UUID | None = Query(default=None),
 ) -> CalibrationResponse:
@@ -70,7 +72,7 @@ async def get_calibration(
     """
     try:
         return await _get_calibration_impl(
-            db, window_days, user_id, agent_id, policy_id
+            db, window_days, current_user.id, agent_id, policy_id
         )
     except HTTPException:
         raise

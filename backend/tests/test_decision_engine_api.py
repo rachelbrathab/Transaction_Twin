@@ -16,22 +16,32 @@ class TestDecisionEndpointExists:
             "/transactions/decide",
             json={},
         )
-        # Should be 422 (validation) not 404 or 405
+        # Without auth: 401. With invalid data: 422. Never 404 or 405.
         assert response.status_code != 404
         assert response.status_code != 405
+
+    def test_decide_requires_auth(self):
+        """Verify unauthenticated request returns 401."""
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app)
+        response = client.post(
+            "/transactions/decide",
+            json={},
+        )
+        assert response.status_code == 401
 
     def test_decide_endpoint_method(self):
         """Verify POST method is registered."""
         from fastapi.testclient import TestClient
 
         client = TestClient(app)
-        # Invalid request should return 422, not 404
         response = client.post(
             "/transactions/decide",
             json={},
         )
-        # Should be 422 (validation error), not 404 (not found)
-        assert response.status_code in (422, 500)
+        # Without auth: 401 is expected
+        assert response.status_code in (401, 422, 500)
 
     def test_decide_requires_intent_id(self):
         from fastapi.testclient import TestClient
@@ -41,7 +51,8 @@ class TestDecisionEndpointExists:
             "/transactions/decide",
             json={"proposal": {"user_id": "u1"}},
         )
-        assert response.status_code in (422, 500)
+        # Without auth: 401
+        assert response.status_code in (401, 422, 500)
 
     def test_decide_requires_proposal(self):
         from fastapi.testclient import TestClient
@@ -51,7 +62,8 @@ class TestDecisionEndpointExists:
             "/transactions/decide",
             json={"intent_id": "some-uuid"},
         )
-        assert response.status_code in (422, 500)
+        # Without auth: 401
+        assert response.status_code in (401, 422, 500)
 
     def test_invalid_intent_id_format(self):
         from fastapi.testclient import TestClient
@@ -70,8 +82,8 @@ class TestDecisionEndpointExists:
                 },
             },
         )
-        # Should be 422 (invalid format) or 500 (DB connection)
-        assert response.status_code in (422, 500)
+        # Without auth: 401. With invalid format: 422 or 500.
+        assert response.status_code in (401, 422, 500)
 
     def test_endpoint_returns_json(self):
         from fastapi.testclient import TestClient
@@ -102,5 +114,5 @@ class TestDecisionEndpointOwnership:
                 },
             },
         )
-        # Should fail validation or DB connection
-        assert response.status_code in (422, 403, 500)
+        # Without auth: 401. With invalid data: 422, 403, or 500.
+        assert response.status_code in (401, 422, 403, 500)

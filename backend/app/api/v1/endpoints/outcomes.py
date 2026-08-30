@@ -9,15 +9,17 @@ import uuid
 from datetime import UTC, datetime
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.models.audit_event import AuditEvent
 from app.models.transaction import Transaction
 from app.models.transaction_event import TransactionEvent
+from app.models.user import User
 from app.services.outcome_engine.models import (
     OutcomeEventType,
     OutcomeSource,
@@ -90,7 +92,7 @@ class OutcomeResponse(BaseModel):
 async def create_outcome(
     transaction_id: uuid.UUID,
     request: OutcomeRequest,
-    user_id: uuid.UUID = Query(..., description="User ID for ownership validation"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OutcomeResponse:
     """Ingest an outcome event for a transaction.
@@ -99,7 +101,7 @@ async def create_outcome(
     Creates a TransactionEvent and updates Transaction.status.
     """
     try:
-        return await _create_outcome_impl(transaction_id, request, user_id, db)
+        return await _create_outcome_impl(transaction_id, request, current_user.id, db)
     except HTTPException:
         raise
     except Exception as e:

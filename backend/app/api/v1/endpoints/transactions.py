@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.core.ownership import validate_agent_belongs_to_user
 from app.models.agent import Agent
 from app.models.audit_event import AuditEvent
@@ -22,6 +23,7 @@ from app.models.decision import Decision
 from app.models.intent import Intent
 from app.models.policy import Policy
 from app.models.transaction import Transaction
+from app.models.user import User
 from app.schemas.decision_engine import (
     DecisionRequest,
     DecisionResponse,
@@ -520,6 +522,7 @@ async def _build_anomaly_context(
 @router.post("/transactions/decide", response_model=DecisionResponse)
 async def decide_transaction(
     request: DecisionRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DecisionResponse:
     """Produce a deterministic transaction disposition.
@@ -528,7 +531,7 @@ async def decide_transaction(
     Does NOT execute payments or call external services.
     """
     try:
-        return await _decide_transaction_impl(request, db)
+        return await _decide_transaction_impl(request, current_user.id, db)
     except HTTPException:
         raise
     except Exception as e:
@@ -541,9 +544,13 @@ async def decide_transaction(
 
 async def _decide_transaction_impl(
     request: DecisionRequest,
+    authenticated_user_id: uuid.UUID,
     db: AsyncSession,
 ) -> DecisionResponse:
     """Implementation of the decision endpoint."""
+    # Alias for backward compatibility with the rest of the function body
+    user_uuid = authenticated_user_id
+
     # 1. Parse proposal
     try:
         proposal = TransactionProposal(**request.proposal)
@@ -570,25 +577,27 @@ async def _decide_transaction_impl(
     if intent_model is None:
         raise HTTPException(status_code=404, detail="Intent not found")
 
-    # 3. Validate ownership
+    # 3. Validate ownership using authenticated user
     try:
-        user_uuid = uuid.UUID(proposal.user_id)
         agent_uuid = uuid.UUID(proposal.agent_id)
-        await validate_agent_belongs_to_user(db, user_uuid, agent_uuid)
+        await validate_agent_belongs_to_user(db, authenticated_user_id, agent_uuid)
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
     # 4. Validate intent ownership
-    if intent_model.user_id != user_uuid:
+    if intent_model.user_id != authenticated_user_id:
         raise HTTPException(
             status_code=403,
-            detail="Intent does not belong to the specified user",
+            detail="Intent does not belong to the authenticated user",
         )
     if intent_model.agent_id != agent_uuid:
         raise HTTPException(
             status_code=403,
             detail="Intent does not belong to the specified agent",
         )
+
+    # 5. Override proposal user_id with authenticated identity
+    proposal.user_id = str(authenticated_user_id)
 
     # 5. Reconstruct StructuredIntent
     if intent_model.structured_intent is None:

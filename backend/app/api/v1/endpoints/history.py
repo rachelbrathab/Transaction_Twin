@@ -8,15 +8,17 @@ Does NOT call LLMs. Read-only.
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.identity import get_current_user
 from app.models.decision import Decision
 from app.models.transaction import Transaction
 from app.models.transaction_event import TransactionEvent
+from app.models.user import User
 from app.services.outcome_engine.feedback import classify_feedback
 
 logger = structlog.get_logger()
@@ -70,7 +72,7 @@ class TransactionHistoryResponse(BaseModel):
 )
 async def get_transaction_history(
     transaction_id: uuid.UUID,
-    user_id: uuid.UUID = Query(..., description="User ID for ownership validation"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TransactionHistoryResponse:
     """Get complete lifecycle history for a transaction.
@@ -79,7 +81,7 @@ async def get_transaction_history(
     from verified outcome history.
     """
     try:
-        return await _get_history_impl(transaction_id, user_id, db)
+        return await _get_history_impl(transaction_id, current_user.id, db)
     except HTTPException:
         raise
     except Exception as e:
