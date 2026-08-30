@@ -1,11 +1,13 @@
-"""Lightweight in-memory rate limiter for authentication endpoints.
+"""Rate limiter for authentication endpoints.
 
 Provides per-IP rate limiting for login and signup to prevent brute-force
-attacks and account spam. Designed to be replaced with Redis-backed limiter
-in production multi-instance deployments.
+attacks and account spam.
 
-Current implementation is single-process only. For multi-process deployments,
-replace with Redis-backed sliding window counter.
+Two backends:
+  - Redis-backed: used in production (multi-process safe)
+  - In-memory: used in development/test (single-process)
+
+If Redis is unavailable at runtime, the limiter falls back to in-memory.
 """
 
 from __future__ import annotations
@@ -13,14 +15,17 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 
+import structlog
 from fastapi import HTTPException, Request
+
+logger = structlog.get_logger()
+
+
+# ── In-Memory Backend ──────────────────────────────────────────────
 
 
 class InMemoryRateLimiter:
     """Sliding window rate limiter using in-memory storage.
-
-    Tracks request counts per key (typically IP address) within a
-    time window. Returns HTTP 429 when the limit is exceeded.
 
     Thread-safe for single-process deployments.
     Not suitable for multi-process/multi-instance deployments.
@@ -29,7 +34,7 @@ class InMemoryRateLimiter:
     def __init__(self) -> None:
         self._requests: dict[str, list[float]] = defaultdict(list)
 
-    def check(self, key: str, limit: int, window_seconds: int) -> None:
+    async def check(self, key: str, limit: int, window_seconds: int) -> None:
         """Check if a request is allowed.
 
         Args:
@@ -59,9 +64,126 @@ class InMemoryRateLimiter:
         self._requests[key].append(now)
 
 
-# Module-level singleton for application-wide use.
-# In production, replace with Redis-backed implementation.
+# ── Redis Backend ──────────────────────────────────────────────────
+
+
+class RedisRateLimiter:
+    """Sliding window rate limiter backed by Redis.
+
+    Uses sorted sets for atomic sliding window counting.
+    Safe for multi-process/multi-instance deployments.
+    Falls back to in-memory if Redis is unavailable.
+    """
+
+    def __init__(self, redis_url: str) -> None:
+        self._redis_url = redis_url
+        self._redis = None
+        self._connected = False
+        self._fallback = InMemoryRateLimiter()
+
+    async def _get_redis(self):  # noqa: ANN202
+        if self._connected and self._redis is not None:
+            return self._redis
+        try:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(
+                self._redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+            await self._redis.ping()
+            self._connected = True
+            logger.info("rate_limiter_redis_connected")
+            return self._redis
+        except Exception:
+            self._connected = False
+            logger.warning("rate_limiter_redis_unavailable_fallback_in_memory")
+            return None
+
+    async def check(self, key: str, limit: int, window_seconds: int) -> None:
+        """Check if a request is allowed using Redis sliding window.
+
+        Falls back to in-memory if Redis is unavailable.
+        """
+        redis_client = await self._get_redis()
+        if redis_client is None:
+            # Fallback to in-memory
+            self._fallback.check(key, limit, window_seconds)
+            return
+
+        try:
+            now = time.time()
+            window_key = f"ratelimit:{key}"
+            cutoff = now - window_seconds
+
+            pipe = redis_client.pipeline()
+            # Remove expired entries
+            pipe.zremrangebyscore(window_key, 0, cutoff)
+            # Count current entries
+            pipe.zcard(window_key)
+            # Add current request
+            pipe.zadd(window_key, {str(now): now})
+            # Set TTL
+            pipe.expire(window_key, window_seconds + 1)
+            results = await pipe.execute()
+
+            current_count = results[1]
+            if current_count >= limit:
+                # Remove the request we just added
+                await redis_client.zrem(window_key, str(now))
+                retry_after = window_seconds
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many requests. Please try again later.",
+                    headers={"Retry-After": str(retry_after)},
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            # Redis error — fall back to in-memory
+            logger.warning("rate_limiter_redis_error_fallback_in_memory")
+            self._fallback.check(key, limit, window_seconds)
+
+
+# ── Singleton ──────────────────────────────────────────────────────
+
+# Module-level rate limiter instance.
+# Initialized lazily based on configuration.
+_rate_limiter = None
+
+
+def get_rate_limiter():  # noqa: ANN202
+    """Get the application rate limiter.
+
+    Uses Redis in production, in-memory in development/test.
+    Returns a singleton.
+    """
+    global _rate_limiter  # noqa: PLW0603
+    if _rate_limiter is not None:
+        return _rate_limiter
+
+    from app.core.config import get_settings
+    settings = get_settings()
+
+    if settings.is_production and settings.redis_url:
+        _rate_limiter = RedisRateLimiter(settings.redis_url)
+    else:
+        _rate_limiter = InMemoryRateLimiter()
+
+    return _rate_limiter
+
+
+# For backward compatibility
 rate_limiter = InMemoryRateLimiter()
+
+
+def clear_rate_limiter() -> None:
+    """Clear rate limiter state — used in tests."""
+    global _rate_limiter  # noqa: PLW0603
+    if _rate_limiter is not None and isinstance(_rate_limiter, InMemoryRateLimiter):
+        _rate_limiter._requests.clear()
+    rate_limiter._requests.clear()
 
 
 def get_client_ip(request: Request) -> str:

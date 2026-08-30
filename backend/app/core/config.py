@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
 
+    # CORS
+    cors_origins: str = "http://localhost:3000"
+
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # Authentication
     jwt_secret_key: str = "dev-only-insecure-key-must-override-in-production-19ad87"
     jwt_algorithm: str = "HS256"

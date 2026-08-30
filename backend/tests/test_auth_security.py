@@ -21,7 +21,7 @@ from app.core.auth import (
     create_access_token,
 )
 from app.core.database import Base, get_db
-from app.core.rate_limit import rate_limiter
+from app.core.rate_limit import clear_rate_limiter
 from app.main import app
 
 # ── Fixtures ────────────────────────────────────────────────────────
@@ -30,10 +30,10 @@ from app.main import app
 @pytest.fixture(autouse=True)
 def _clear_state():
     """Clear rate limiter and dependency overrides after each test."""
-    rate_limiter._requests.clear()
+    clear_rate_limiter()
     yield
     app.dependency_overrides.clear()
-    rate_limiter._requests.clear()
+    clear_rate_limiter()
 
 
 def _make_engine_and_factory():
@@ -176,7 +176,7 @@ class TestLoginRateLimiting:
         """Rate limit resets after the time window expires."""
         # This test verifies the rate limiter uses time windows
         # by checking that a fresh key works
-        rate_limiter._requests.clear()
+        clear_rate_limiter()
         engine, factory = _make_engine_and_factory()
         await _create_tables(engine)
         _setup_db_override(factory)

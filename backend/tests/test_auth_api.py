@@ -18,17 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.auth import create_access_token, decode_access_token
 from app.core.database import Base, get_db
-from app.core.rate_limit import rate_limiter
+from app.core.rate_limit import clear_rate_limiter
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
 def _clear_overrides():
     """Ensure dependency overrides and rate limiter are cleared after every test."""
-    rate_limiter._requests.clear()
+    clear_rate_limiter()
     yield
     app.dependency_overrides.clear()
-    rate_limiter._requests.clear()
+    clear_rate_limiter()
 
 
 def _make_engine_and_factory():

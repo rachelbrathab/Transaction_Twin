@@ -1,4 +1,5 @@
-"""Transaction Twin — Backend API Server
+"""
+Transaction Twin — Backend API Server
 
 FastAPI application for the Transaction Twin risk control plane.
 
@@ -18,6 +19,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings, validate_production_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
+from app.core.security_headers import SecurityHeadersMiddleware
 
 settings = get_settings()
 logger = structlog.get_logger()
@@ -46,14 +48,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
+# CORS middleware — production origins are comma-separated in CORS_ORIGINS env var
+_cors_origins: list[str] = [
+    o.strip() for o in settings.cors_origins.split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security headers
+app.add_middleware(SecurityHeadersMiddleware, is_production=settings.is_production)
 
 # Error handlers
 register_error_handlers(app)

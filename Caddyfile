@@ -1,0 +1,54 @@
+# Transaction Twin — Caddy Reverse Proxy
+#
+# Development: http://localhost (no TLS)
+# Production:  https://$DOMAIN (auto-TLS via Let's Encrypt)
+#
+# Caddy handles:
+#   - TLS certificate management (automatic)
+#   - HTTP → HTTPS redirect
+#   - Security headers
+#   - Frontend serving (/)
+#   - Backend API proxy (/api/*)
+#   - Authentication endpoints (/auth/*)
+#
+# Usage:
+#   Development: docker compose up caddy
+#   Production:  Set DOMAIN env var and use docker-compose.prod.yml
+
+{$DOMAIN:localhost} {
+    # ── Security Headers ────────────────────────────────────────
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-XSS-Protection "0"
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        -Server
+    }
+
+    # ── Backend API ─────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # ── Auth endpoints ──────────────────────────────────────────
+    handle /auth/* {
+        reverse_proxy backend:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    # ── Health endpoint (backend) ───────────────────────────────
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # ── Everything else → Frontend ──────────────────────────────
+    handle {
+        reverse_proxy frontend:3000
+    }
+}

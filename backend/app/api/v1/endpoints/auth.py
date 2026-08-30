@@ -26,7 +26,7 @@ from app.core.auth import (
 )
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.rate_limit import get_client_ip, rate_limiter
+from app.core.rate_limit import get_client_ip, get_rate_limiter
 from app.models.refresh_token import RefreshTokenRecord
 from app.models.user import User
 
@@ -126,7 +126,7 @@ async def signup(
     """
     # Rate limit check
     client_ip = get_client_ip(req)
-    rate_limiter.check(f"signup:{client_ip}", _SIGNUP_RATE_LIMIT, _SIGNUP_RATE_WINDOW)
+    await get_rate_limiter().check(f"signup:{client_ip}", _SIGNUP_RATE_LIMIT, _SIGNUP_RATE_WINDOW)
 
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == request.email))
@@ -177,7 +177,7 @@ async def login(
     """
     # Rate limit check
     client_ip = get_client_ip(req)
-    rate_limiter.check(f"login:{client_ip}", _LOGIN_RATE_LIMIT, _LOGIN_RATE_WINDOW)
+    await get_rate_limiter().check(f"login:{client_ip}", _LOGIN_RATE_LIMIT, _LOGIN_RATE_WINDOW)
 
     result = await db.execute(select(User).where(User.email == request.email))
     user = result.scalar_one_or_none()

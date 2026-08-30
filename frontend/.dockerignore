@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+.env*
+!.env.example
+README.md
+AGENTS.md
+CLAUDE.md
+tsconfig.tsbuildinfo
