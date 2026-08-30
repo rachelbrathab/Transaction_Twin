@@ -16,9 +16,11 @@ All tests use a disposable PostgreSQL database 'sprint22b_test'.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import pytest
 import pytest_asyncio
@@ -29,14 +31,24 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.core.database import Base
 from app.models.calibration_recommendation import (
     CalibrationRecommendationRecord,
 )
 from app.models.calibration_version import CalibrationVersionRecord
 
-PG_URL = (
-    "postgresql+asyncpg://postgres@127.0.0.1:5432/sprint22b_test"
-)
+
+def _derive_pg_url() -> str:
+    """Derive PG test URL from DATABASE_URL, replacing the database name."""
+    database_url = os.environ.get(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres@127.0.0.1:5432/transaction_twin",
+    )
+    parsed = urlparse(database_url)
+    return urlunparse(parsed._replace(path="/transaction_twin_test"))
+
+
+PG_URL = _derive_pg_url()
 
 USER_A = uuid.uuid4()
 USER_B = uuid.uuid4()
@@ -49,6 +61,9 @@ USER_B = uuid.uuid4()
 async def pg_engine():
     """Create an async engine connected to the PostgreSQL test DB."""
     engine = create_async_engine(PG_URL, echo=False)
+    # Ensure schema exists (CI runs migrations after tests)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     # Clean up calibration tables before each test
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM audit_events"))
