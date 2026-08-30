@@ -6,12 +6,15 @@ Tokens contain the user's UUID and are signed with a server-side secret.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
 import structlog
+from sqlalchemy import select as sa_select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 
@@ -68,3 +71,69 @@ def decode_access_token(token: str) -> uuid.UUID | None:
         return uuid.UUID(user_id_str)
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError):
         return None
+
+
+# ── Refresh Token Functions ────────────────────────────────────────
+
+
+def _hash_token(token: str) -> str:
+    """Create a SHA-256 hash of a token for storage."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def create_refresh_token(db: AsyncSession, user_id: uuid.UUID) -> str:
+    """Create a new refresh token, persist it, and return the raw token.
+
+    The raw token is returned to be set as an HttpOnly cookie.
+    Only the hash is stored in the database.
+    """
+    from app.models.refresh_token import RefreshTokenRecord
+
+    # 128 bits of entropy from two UUID4s
+    raw_token = str(uuid.uuid4()) + ":" + str(uuid.uuid4())
+    token_hash = _hash_token(raw_token)
+
+    db_token = RefreshTokenRecord(
+        user_id=user_id,
+        token_hash=token_hash,
+        expires_at=datetime.now(UTC)
+        + timedelta(days=settings.jwt_refresh_token_expire_days),
+    )
+    db.add(db_token)
+    await db.flush()
+
+    return raw_token
+
+
+async def validate_refresh_token(
+    db: AsyncSession, raw_token: str
+) -> tuple[uuid.UUID, uuid.UUID] | None:
+    """Validate a refresh token and return (user_id, token_record_id).
+
+    Looks up the token by hash. Returns None if not found, expired, or revoked.
+    """
+    from app.models.refresh_token import RefreshTokenRecord
+
+    token_hash = _hash_token(raw_token)
+    result = await db.execute(
+        sa_select(RefreshTokenRecord).where(
+            RefreshTokenRecord.token_hash == token_hash,
+        )
+    )
+    db_token = result.scalar_one_or_none()
+
+    if db_token is None:
+        return None
+
+    if db_token.revoked_at is not None:
+        return None
+
+    # Handle both naive (SQLite) and aware (PostgreSQL) datetimes
+    now = datetime.now(UTC)
+    expires = db_token.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if expires < now:
+        return None
+
+    return (db_token.user_id, db_token.id)

@@ -2,7 +2,8 @@
  * API client configuration for Transaction Twin backend.
  *
  * All API calls go through /api/v1/* prefix.
- * Authentication is handled via JWT Bearer tokens stored in localStorage.
+ * Authentication is handled via JWT Bearer tokens stored in memory
+ * and refresh tokens stored as HttpOnly cookies.
  * Never exposes secrets to the client — backend handles all sensitive operations.
  */
 
@@ -24,23 +25,76 @@ interface RequestOptions extends Omit<RequestInit, "body" | "method"> {
 
 // ── Token management ──────────────────────────────────────────────
 
+// Access tokens are stored in memory (not localStorage) for XSS safety.
+// Refresh tokens are HttpOnly cookies — invisible to JavaScript.
+let _accessToken: string | null = null;
+
 export function getStoredToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  return _accessToken;
 }
 
 export function setStoredToken(token: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(TOKEN_KEY, token);
+  _accessToken = token;
 }
 
 export function clearStoredToken(): void {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem(TOKEN_KEY);
+  _accessToken = null;
 }
 
 export function isAuthenticated(): boolean {
-  return getStoredToken() !== null;
+  return _accessToken !== null;
+}
+
+// Prevent infinite refresh loops
+let _isRefreshing = false;
+let _refreshPromise: Promise<boolean> | null = null;
+
+// ── Token refresh ─────────────────────────────────────────────────
+
+async function tryRefreshToken(): Promise<boolean> {
+  // If already refreshing, wait for the existing refresh
+  if (_isRefreshing && _refreshPromise) {
+    return _refreshPromise;
+  }
+
+  _isRefreshing = true;
+  _refreshPromise = _doRefresh();
+
+  try {
+    return await _refreshPromise;
+  } finally {
+    _isRefreshing = false;
+    _refreshPromise = null;
+  }
+}
+
+async function _doRefresh(): Promise<boolean> {
+  try {
+    const url = `${API_BASE_URL}${API_V1_PREFIX}/auth/refresh`;
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "include", // Send HttpOnly refresh token cookie
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.access_token) {
+        setStoredToken(data.access_token);
+        return true;
+      }
+    }
+
+    // Refresh failed — clear token and redirect to login
+    clearStoredToken();
+    return false;
+  } catch {
+    clearStoredToken();
+    return false;
+  }
 }
 
 // ── API request functions ─────────────────────────────────────────
@@ -59,6 +113,14 @@ export async function apiPost<T>(path: string, body?: unknown, options?: Request
 }
 
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return _apiRequestWithRetry<T>(path, options, false);
+}
+
+async function _apiRequestWithRetry<T>(
+  path: string,
+  options: RequestOptions,
+  isRetry: boolean,
+): Promise<T> {
   const url = `${API_BASE_URL}${API_V1_PREFIX}${path}`;
 
   const { body: reqBody, headers: reqHeaders, ...restOptions } = options;
@@ -72,6 +134,7 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
 
   const response = await fetch(url, {
     ...restOptions,
+    credentials: "include", // Always send cookies (for refresh token)
     headers: {
       Accept: "application/json",
       ...authHeaders,
@@ -80,10 +143,15 @@ async function apiRequest<T>(path: string, options: RequestOptions = {}): Promis
     body: typeof reqBody === "string" ? reqBody : undefined,
   });
 
-  // Handle 401 — clear token and redirect to login
-  if (response.status === 401) {
+  // Handle 401 — try refresh token flow (once)
+  if (response.status === 401 && !isRetry && path !== "/auth/refresh") {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      // Retry the original request with the new access token
+      return _apiRequestWithRetry<T>(path, options, true);
+    }
+    // Refresh failed — redirect to login
     clearStoredToken();
-    // Use a soft redirect via location to handle both server and client contexts
     if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
       window.location.replace("/login");
     }

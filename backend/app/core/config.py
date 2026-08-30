@@ -46,7 +46,8 @@ class Settings(BaseSettings):
     # Authentication
     jwt_secret_key: str = "dev-only-insecure-key-must-override-in-production-19ad87"
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 7
 
     @property
     def is_development(self) -> bool:
@@ -55,6 +56,47 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def is_testing(self) -> bool:
+        return self.app_env == "testing"
+
+
+# Known insecure development-only JWT secret.
+# Must match the default value in Settings.jwt_secret_key.
+_INSECURE_DEV_JWT_SECRET = "dev-only-insecure-key-must-override-in-production-19ad87"
+
+
+def validate_production_settings(settings: Settings) -> None:
+    """Fail-fast validation for production environment.
+
+    Raises RuntimeError if the application is configured for production
+    but has an insecure or missing JWT secret key.
+
+    This function is intentionally called during startup, not at import time,
+    so that tests and development environments are not affected.
+    """
+    if not settings.is_production:
+        return
+
+    if (
+        not settings.jwt_secret_key
+        or settings.jwt_secret_key == _INSECURE_DEV_JWT_SECRET
+    ):
+        raise RuntimeError(
+            "FATAL: JWT_SECRET_KEY is missing or set to the insecure "
+            "development default. Production requires a strong, unique "
+            "secret key. Set the JWT_SECRET_KEY environment variable to a "
+            "secure random value (at least 32 characters). "
+            "Application startup aborted."
+        )
+
+    if len(settings.jwt_secret_key) < 32:
+        raise RuntimeError(
+            "FATAL: JWT_SECRET_KEY is too short. Production requires a "
+            "secret key of at least 32 characters. "
+            "Application startup aborted."
+        )
 
 
 @lru_cache
