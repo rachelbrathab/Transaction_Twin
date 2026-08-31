@@ -337,7 +337,7 @@ class TestRuntimeConfigEndpoint:
                 transport=transport, base_url="http://testserver",
             ) as client:
                 resp = await client.get(
-                    "/analytics/calibration/effective-config",
+                    "/api/v1/analytics/calibration/effective-config",
                 )
                 assert resp.status_code == 200
                 data = resp.json()
@@ -384,7 +384,7 @@ class TestRuntimeConfigEndpoint:
                 transport=transport, base_url="http://testserver",
             ) as client:
                 resp = await client.get(
-                    "/analytics/calibration/effective-config",
+                    "/api/v1/analytics/calibration/effective-config",
                 )
                 assert resp.status_code == 200
                 data = resp.json()
@@ -413,7 +413,7 @@ class TestRuntimeConfigEndpoint:
                 transport=transport, base_url="http://testserver",
             ) as client:
                 resp = await client.get(
-                    "/analytics/calibration/effective-config",
+                    "/api/v1/analytics/calibration/effective-config",
                 )
                 assert resp.status_code == 401
         finally:
@@ -458,7 +458,7 @@ class TestRuntimeConfigEndpoint:
             ) as client:
                 # Authenticated as user_a should see defaults, not user_b's calibration
                 resp = await client.get(
-                    "/analytics/calibration/effective-config",
+                    "/api/v1/analytics/calibration/effective-config",
                 )
                 assert resp.status_code == 200
                 data = resp.json()

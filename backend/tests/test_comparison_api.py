@@ -21,7 +21,7 @@ class TestComparisonAPI:
     async def test_endpoint_exists(self, client):
         """Endpoint exists and accepts POST requests."""
         response = await client.post(
-            "/comparisons/compare",
+            "/api/v1/comparisons/compare",
             json={
                 "proposal": {
                     "user_id": USER_ID,
@@ -40,14 +40,14 @@ class TestComparisonAPI:
     @pytest.mark.asyncio
     async def test_missing_body(self, client):
         """Missing request body returns error."""
-        response = await client.post("/comparisons/compare", json={})
+        response = await client.post("/api/v1/comparisons/compare", json={})
         assert response.status_code in (200, 404, 422, 500)
 
     @pytest.mark.asyncio
     async def test_invalid_proposal_missing_fields(self, client):
         """Proposal missing required fields returns validation error."""
         response = await client.post(
-            "/comparisons/compare",
+            "/api/v1/comparisons/compare",
             json={"proposal": {}},
         )
         assert response.status_code in (200, 404, 422, 500)
@@ -56,7 +56,7 @@ class TestComparisonAPI:
     async def test_invalid_intent_id_format(self, client):
         """Non-UUID intent_id is accepted by the endpoint."""
         response = await client.post(
-            "/comparisons/compare",
+            "/api/v1/comparisons/compare",
             json={
                 "proposal": {
                     "user_id": USER_ID,
@@ -75,5 +75,5 @@ class TestComparisonAPI:
     @pytest.mark.asyncio
     async def test_method_not_allowed(self, client):
         """GET is not allowed."""
-        response = await client.get("/comparisons/compare")
+        response = await client.get("/api/v1/comparisons/compare")
         assert response.status_code == 405

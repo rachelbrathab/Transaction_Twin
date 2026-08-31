@@ -67,5 +67,10 @@ app.add_middleware(SecurityHeadersMiddleware, is_production=settings.is_producti
 # Error handlers
 register_error_handlers(app)
 
-# API router — both root /health and /api/v1/* live on the same app
-app.include_router(api_router)
+# Direct /health endpoint for reverse-proxy liveness checks (Caddy routes /health)
+@app.get("/health")
+async def _root_health() -> dict[str, str]:
+    return {"status": "ok"}
+
+# API router — all routes under /api/v1
+app.include_router(api_router, prefix=settings.api_v1_prefix)

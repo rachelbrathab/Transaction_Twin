@@ -16,7 +16,7 @@ class TestPolicyEvaluationAPI:
     def test_endpoint_exists(self) -> None:
         """Endpoint exists and returns a response."""
         response = self.client.post(
-            "/policies/evaluate",
+            "/api/v1/policies/evaluate",
             json={"intent_id": "00000000-0000-0000-0000-000000000000",
                   "proposal": {}},
         )
@@ -26,7 +26,7 @@ class TestPolicyEvaluationAPI:
     def test_invalid_intent_id_format(self) -> None:
         """Invalid UUID format returns 422."""
         response = self.client.post(
-            "/policies/evaluate",
+            "/api/v1/policies/evaluate",
             json={"intent_id": "not-a-uuid", "proposal": {}},
         )
         assert response.status_code == 422
@@ -34,7 +34,7 @@ class TestPolicyEvaluationAPI:
     def test_missing_fields_returns_error(self) -> None:
         """Missing required fields returns error."""
         response = self.client.post(
-            "/policies/evaluate",
+            "/api/v1/policies/evaluate",
             json={},
         )
         assert response.status_code in (422, 500)
@@ -42,7 +42,7 @@ class TestPolicyEvaluationAPI:
     def test_invalid_proposal_returns_error(self) -> None:
         """Malformed proposal returns error."""
         response = self.client.post(
-            "/policies/evaluate",
+            "/api/v1/policies/evaluate",
             json={
                 "intent_id": "00000000-0000-0000-0000-000000000000",
                 "proposal": {

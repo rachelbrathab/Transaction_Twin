@@ -174,7 +174,7 @@ class TestOutcomeOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_a_id']}/outcomes",
+                    f"/api/v1/transactions/{data['txn_a_id']}/outcomes",
                     json={
                         "event_type": "payment_initiated",
                         "source": "payment_provider",
@@ -206,7 +206,7 @@ class TestOutcomeOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes",
+                    f"/api/v1/transactions/{data['txn_b_id']}/outcomes",
                     json={
                         "event_type": "payment_success",
                         "source": "payment_provider",
@@ -236,7 +236,7 @@ class TestOutcomeOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes",
+                    f"/api/v1/transactions/{data['txn_b_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
 
@@ -271,7 +271,7 @@ class TestOutcomeOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_id']}/outcomes",
+                    f"/api/v1/transactions/{data['txn_b_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
                 assert response.status_code == 403
@@ -299,7 +299,7 @@ class TestOutcomeOwnership:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 fake_id = str(uuid.uuid4())
                 response = await client.post(
-                    f"/transactions/{fake_id}/outcomes",
+                    f"/api/v1/transactions/{fake_id}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
                 assert response.status_code == 404
@@ -332,7 +332,7 @@ class TestOutcomeOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_a_id']}/outcomes",
+                    f"/api/v1/transactions/{data['txn_a_id']}/outcomes",
                     json={"event_type": "payment_success", "source": "payment_provider"},
                 )
                 assert response.status_code == 401
@@ -362,7 +362,7 @@ class TestReviewOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review",
+                    f"/api/v1/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Looks good", "actor_id": "reviewer-1"},
                 )
                 assert response.status_code == 200
@@ -390,7 +390,7 @@ class TestReviewOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review",
+                    f"/api/v1/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Unauthorized"},
                 )
                 assert response.status_code == 403
@@ -415,7 +415,7 @@ class TestReviewOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review",
+                    f"/api/v1/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve", "reason": "Unauthorized"},
                 )
 
@@ -450,7 +450,7 @@ class TestReviewOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    f"/transactions/{data['txn_b_review_id']}/review",
+                    f"/api/v1/transactions/{data['txn_b_review_id']}/review",
                     json={"action": "approve"},
                 )
 
@@ -488,7 +488,7 @@ class TestHistoryOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_a_id']}/history",
+                    f"/api/v1/transactions/{data['txn_a_id']}/history",
                 )
                 assert response.status_code == 200
                 body = response.json()
@@ -514,7 +514,7 @@ class TestHistoryOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_b_id']}/history",
+                    f"/api/v1/transactions/{data['txn_b_id']}/history",
                 )
                 assert response.status_code == 403
         finally:
@@ -538,7 +538,7 @@ class TestHistoryOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_b_id']}/history",
+                    f"/api/v1/transactions/{data['txn_b_id']}/history",
                 )
                 assert response.status_code == 403
                 body_str = str(response.json())
@@ -565,7 +565,7 @@ class TestHistoryOwnership:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 fake_id = str(uuid.uuid4())
                 response = await client.get(
-                    f"/transactions/{fake_id}/history",
+                    f"/api/v1/transactions/{fake_id}/history",
                 )
                 assert response.status_code == 404
         finally:
@@ -597,7 +597,7 @@ class TestHistoryOwnership:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    f"/transactions/{data['txn_a_id']}/history",
+                    f"/api/v1/transactions/{data['txn_a_id']}/history",
                 )
                 assert response.status_code == 401
         finally:

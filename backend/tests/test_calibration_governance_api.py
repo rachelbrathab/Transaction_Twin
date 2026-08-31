@@ -154,7 +154,7 @@ class TestOutcomesOwnership:
             # Remove identity override to test the real dependency
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
-                "/analytics/calibration/outcomes",
+                "/api/v1/analytics/calibration/outcomes",
             )
             assert resp.status_code == 401
         finally:
@@ -168,7 +168,7 @@ class TestOutcomesOwnership:
         client, _ = await _make_client(engine)
         try:
             resp = await client.get(
-                "/analytics/calibration/outcomes",
+                "/api/v1/analytics/calibration/outcomes",
                 params={
                     "user_id": str(USER_A),
                     "window_days": 30,
@@ -191,7 +191,7 @@ class TestRecommendationsOwnership:
         try:
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
             )
             assert resp.status_code == 401
         finally:
@@ -208,7 +208,7 @@ class TestRecommendationsOwnership:
                 await _create_recommendation(session)
                 await session.commit()
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
 
             )
             assert resp.status_code == 200
@@ -231,7 +231,7 @@ class TestRecommendationsOwnership:
                 )
                 await session.commit()
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
 
             )
             assert resp.status_code == 200
@@ -251,7 +251,7 @@ class TestReviewOwnership:
         try:
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "recommendations/some-id/review",
                 json={"action": "approve"},
             )
@@ -269,7 +269,7 @@ class TestReviewOwnership:
         client, _ = await _make_client(engine)
         try:
             resp = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 f"recommendations/{uuid.uuid4()}/review",
 
                 json={"action": "approve"},
@@ -289,7 +289,7 @@ class TestActivationOwnership:
         try:
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/some-id/activate",
                 json={"confirm": True},
             )
@@ -305,7 +305,7 @@ class TestActivationOwnership:
         client, _ = await _make_client(engine)
         try:
             resp = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 f"versions/{uuid.uuid4()}/activate",
 
                 json={"confirm": True},
@@ -337,7 +337,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -364,7 +364,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={
@@ -393,7 +393,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -418,7 +418,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "reject"},
@@ -443,7 +443,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -467,7 +467,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -496,7 +496,7 @@ class TestReviewStateMachine:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
                 json={"action": "approve"},
             )
@@ -520,7 +520,7 @@ class TestReviewStateMachine:
                 rec_id = str(rec.id)
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "bogus"},
@@ -552,7 +552,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -587,7 +587,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -612,7 +612,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -637,7 +637,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": False},
@@ -662,7 +662,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp1 = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v1/activate",
 
                 json={"confirm": True},
@@ -678,7 +678,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp2 = await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v2/activate",
 
                 json={"confirm": True},
@@ -719,7 +719,7 @@ class TestActivationStateMachine:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
                 json={"confirm": True},
             )
@@ -748,7 +748,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -777,7 +777,7 @@ class TestActivationStateMachine:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -809,7 +809,7 @@ class TestIdempotency:
                 await session.commit()
 
             resp1 = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -818,7 +818,7 @@ class TestIdempotency:
             assert resp1.json()["idempotent"] is False
 
             resp2 = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -845,7 +845,7 @@ class TestIdempotency:
 
             # Already approved, approve again → idempotent
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -878,13 +878,13 @@ class TestDataIntegrity:
 
             # Two-step: generated → reviewed → approved
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
             )
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -925,7 +925,7 @@ class TestDataIntegrity:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={
@@ -972,7 +972,7 @@ class TestDataIntegrity:
                 await session.commit()
 
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -1015,7 +1015,7 @@ class TestDataIntegrity:
                 await session.commit()
 
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -1058,7 +1058,7 @@ class TestAuditEvents:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -1096,7 +1096,7 @@ class TestAuditEvents:
                 await session.commit()
 
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -1140,13 +1140,13 @@ class TestAuditEvents:
                 await session.commit()
 
             await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v1/activate",
 
                 json={"confirm": True},
             )
             await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v2/activate",
 
                 json={"confirm": True},
@@ -1237,7 +1237,7 @@ class TestSecurity:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
                 json={"action": "approve"},
             )
@@ -1268,7 +1268,7 @@ class TestSecurity:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
                 json={"confirm": True},
             )
@@ -1292,7 +1292,7 @@ class TestRecommendationsListing:
         client, _ = await _make_client(engine)
         try:
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
 
             )
             assert resp.status_code == 200
@@ -1323,7 +1323,7 @@ class TestRecommendationsListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
 
             )
             data = resp.json()
@@ -1356,7 +1356,7 @@ class TestRecommendationsListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
                 params={
                     "user_id": str(USER_A),
                     "status": "approved",
@@ -1394,7 +1394,7 @@ class TestRecommendationsListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/recommendations",
+                "/api/v1/analytics/calibration/recommendations",
                 params={
                     "user_id": str(USER_A),
                     "engine": "risk_engine",
@@ -1428,7 +1428,7 @@ class TestAuditMetadata:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -1466,7 +1466,7 @@ class TestAuditMetadata:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -1504,7 +1504,7 @@ class TestAuditMetadata:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "reject", "reason": "No"},
@@ -1542,7 +1542,7 @@ class TestAuditMetadata:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "reject"},
@@ -1581,7 +1581,7 @@ class TestAuditMetadata:
                 await session.commit()
 
             await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"versions/{vid}/activate",
 
                 json={"confirm": True},
@@ -1625,13 +1625,13 @@ class TestAuditMetadata:
                 await session.commit()
 
             await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v1/activate",
 
                 json={"confirm": True},
             )
             await client.post(
-                "/analytics/calibration/"
+                "/api/v1/analytics/calibration/"
                 "versions/v2/activate",
 
                 json={"confirm": True},
@@ -1676,7 +1676,7 @@ class TestGovernanceTimestamps:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -1718,7 +1718,7 @@ class TestGovernanceTimestamps:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "approve"},
@@ -1759,7 +1759,7 @@ class TestGovernanceTimestamps:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={
@@ -1805,7 +1805,7 @@ class TestGovernanceTimestamps:
                 await session.commit()
 
             resp = await client.post(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}/review",
 
                 json={"action": "reject"},

@@ -141,7 +141,7 @@ class TestGenerateEndpoint:
         try:
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.post(
-                "/analytics/calibration/generate",
+                "/api/v1/analytics/calibration/generate",
                 json={"window_days": 30},
             )
             assert resp.status_code == 401
@@ -156,7 +156,7 @@ class TestGenerateEndpoint:
         client, _ = await _make_client(engine)
         try:
             resp = await client.post(
-                "/analytics/calibration/generate",
+                "/api/v1/analytics/calibration/generate",
 
                 json={"window_days": 30},
             )
@@ -182,7 +182,7 @@ class TestVersionListing:
         try:
             app.dependency_overrides.pop(get_current_user, None)
             resp = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
             )
             assert resp.status_code == 401
         finally:
@@ -196,7 +196,7 @@ class TestVersionListing:
         client, _ = await _make_client(engine)
         try:
             resp = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
 
             )
             assert resp.status_code == 200
@@ -221,7 +221,7 @@ class TestVersionListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
 
             )
             assert resp.status_code == 200
@@ -247,7 +247,7 @@ class TestVersionListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
 
             )
             data = resp.json()
@@ -273,7 +273,7 @@ class TestVersionListing:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
                 params={
                     "user_id": str(USER_A),
                     "status": "active",
@@ -300,7 +300,7 @@ class TestVersionDetail:
         client, _ = await _make_client(engine)
         try:
             resp = await client.get(
-                "/analytics/calibration/versions/nonexistent",
+                "/api/v1/analytics/calibration/versions/nonexistent",
 
             )
             assert resp.status_code == 404
@@ -325,7 +325,7 @@ class TestVersionDetail:
                 await session.commit()
 
             resp = await client.get(
-                "/analytics/calibration/versions/v1",
+                "/api/v1/analytics/calibration/versions/v1",
 
             )
             assert resp.status_code == 200
@@ -354,7 +354,7 @@ class TestVersionDetail:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.get(
-                "/analytics/calibration/versions/v1",
+                "/api/v1/analytics/calibration/versions/v1",
             )
             assert resp.status_code == 404
         finally:
@@ -376,7 +376,7 @@ class TestRecommendationDetail:
         client, _ = await _make_client(engine)
         try:
             resp = await client.get(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{uuid.uuid4()}",
 
             )
@@ -397,7 +397,7 @@ class TestRecommendationDetail:
                 await session.commit()
 
             resp = await client.get(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}",
 
             )
@@ -426,7 +426,7 @@ class TestRecommendationDetail:
             global _active_user_id
             _active_user_id = USER_B
             resp = await client.get(
-                f"/analytics/calibration/"
+                f"/api/v1/analytics/calibration/"
                 f"recommendations/{rec_id}",
             )
             assert resp.status_code == 404
@@ -527,14 +527,14 @@ class TestIdempotency:
                 await session.commit()
 
             resp_a = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
             )
 
             # Switch identity to USER_B
             global _active_user_id
             _active_user_id = USER_B
             resp_b = await client.get(
-                "/analytics/calibration/versions",
+                "/api/v1/analytics/calibration/versions",
             )
 
             _active_user_id = USER_A

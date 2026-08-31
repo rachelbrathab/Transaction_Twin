@@ -17,7 +17,7 @@ class TestIntentAPI:
     @pytest.mark.asyncio
     async def test_parse_endpoint_exists(self, client):
         response = await client.post(
-            "/intents/parse",
+            "/api/v1/intents/parse",
             json={
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "agent_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
@@ -31,20 +31,20 @@ class TestIntentAPI:
     @pytest.mark.asyncio
     async def test_parse_missing_fields(self, client):
         response = await client.post(
-            "/intents/parse",
+            "/api/v1/intents/parse",
             json={"original_request": "Buy shoes"},
         )
         assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_parse_empty_body(self, client):
-        response = await client.post("/intents/parse", json={})
+        response = await client.post("/api/v1/intents/parse", json={})
         assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_parse_rejects_invalid_uuids(self, client):
         response = await client.post(
-            "/intents/parse",
+            "/api/v1/intents/parse",
             json={
                 "user_id": "invalid",
                 "agent_id": "invalid",

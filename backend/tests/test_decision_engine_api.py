@@ -13,7 +13,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={},
         )
         # Without auth: 401. With invalid data: 422. Never 404 or 405.
@@ -26,7 +26,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={},
         )
         assert response.status_code == 401
@@ -37,7 +37,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={},
         )
         # Without auth: 401 is expected
@@ -48,7 +48,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={"proposal": {"user_id": "u1"}},
         )
         # Without auth: 401
@@ -59,7 +59,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={"intent_id": "some-uuid"},
         )
         # Without auth: 401
@@ -70,7 +70,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={
                 "intent_id": "not-a-uuid",
                 "proposal": {
@@ -90,7 +90,7 @@ class TestDecisionEndpointExists:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={},
         )
         assert response.headers.get("content-type", "").startswith("application/json")
@@ -102,7 +102,7 @@ class TestDecisionEndpointOwnership:
 
         client = TestClient(app)
         response = client.post(
-            "/transactions/decide",
+            "/api/v1/transactions/decide",
             json={
                 "intent_id": "00000000-0000-0000-0000-000000000001",
                 "proposal": {

@@ -1,6 +1,7 @@
 """Health check endpoints.
 
-Provides GET /health and GET /api/v1/health for liveness and readiness checks.
+Provides GET /api/v1/health for readiness checks.
+Liveness checks are handled by the root /health endpoint in main.py.
 """
 
 import structlog
@@ -15,13 +16,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def root_health() -> dict[str, str]:
-    """Basic liveness check — no database dependency."""
-    return {"status": "ok"}
-
-
-@router.get("/api/v1/health")
-async def api_v1_health(db: AsyncSession = Depends(get_db)) -> dict[str, str | bool]:
+async def health(db: AsyncSession = Depends(get_db)) -> dict[str, str | bool]:
     """Readiness check — verifies database connectivity."""
     try:
         await db.execute(text("SELECT 1"))

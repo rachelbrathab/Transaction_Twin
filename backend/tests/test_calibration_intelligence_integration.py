@@ -10,7 +10,7 @@ class TestCalibrationIntelligenceEndpoints:
         from fastapi.testclient import TestClient
 
         client = TestClient(app)
-        response = client.get("/analytics/calibration/outcomes")
+        response = client.get("/api/v1/analytics/calibration/outcomes")
         # Without auth: 401. With auth: 200. Never 404/405.
         assert response.status_code in (401, 200)
         assert response.status_code != 404
@@ -20,7 +20,7 @@ class TestCalibrationIntelligenceEndpoints:
         from fastapi.testclient import TestClient
 
         client = TestClient(app)
-        response = client.get("/analytics/calibration/recommendations")
+        response = client.get("/api/v1/analytics/calibration/recommendations")
         assert response.status_code in (401, 200)
         assert response.status_code != 404
         assert response.status_code != 405
@@ -30,7 +30,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.post(
-            "/analytics/calibration/recommendations/fake-id/review",
+            "/api/v1/analytics/calibration/recommendations/fake-id/review",
             json={"action": "approve"},
         )
         # Without auth: 401. Not 405.
@@ -42,7 +42,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.post(
-            "/analytics/calibration/versions/calibration-v1/activate",
+            "/api/v1/analytics/calibration/versions/calibration-v1/activate",
             json={"confirm": True},
         )
         assert response.status_code in (401, 404)
@@ -53,7 +53,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.get(
-            "/analytics/calibration/outcomes?window_days=7",
+            "/api/v1/analytics/calibration/outcomes?window_days=7",
         )
         # Without auth: 401
         assert response.status_code in (200, 401, 422, 500)
@@ -63,7 +63,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.get(
-            "/analytics/calibration/outcomes?window_days=200",
+            "/api/v1/analytics/calibration/outcomes?window_days=200",
         )
         # Without auth: 401. With auth: 422.
         assert response.status_code in (401, 422)
@@ -73,7 +73,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.post(
-            "/analytics/calibration/recommendations/fake-id/review",
+            "/api/v1/analytics/calibration/recommendations/fake-id/review",
             json={"action": "invalid"},
         )
         assert response.status_code in (401, 422)
@@ -83,7 +83,7 @@ class TestCalibrationIntelligenceEndpoints:
 
         client = TestClient(app)
         response = client.post(
-            "/analytics/calibration/versions/calibration-v1/activate",
+            "/api/v1/analytics/calibration/versions/calibration-v1/activate",
             json={"confirm": False},
         )
         assert response.status_code in (401, 422)

@@ -65,16 +65,6 @@ jobs:
           source .venv/bin/activate
           ruff check .
 
-      - name: Backend tests
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
-          REDIS_URL: redis://localhost:6379/0
-          APP_ENV: testing
-        run: |
-          source .venv/bin/activate
-          pytest -x --tb=short -q
-
       - name: Migration verification
         working-directory: backend
         env:
@@ -84,6 +74,16 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+
+      - name: Backend tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@localhost:5432/${{ env.POSTGRES_DB }}
+          REDIS_URL: redis://localhost:6379/0
+          APP_ENV: testing
+        run: |
+          source .venv/bin/activate
+          pytest -x --tb=short -q
 
   # ── Frontend ─────────────────────────────────────────────────────
   frontend:

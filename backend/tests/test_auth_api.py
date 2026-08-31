@@ -71,7 +71,7 @@ class TestSignup:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "test@example.com",
                         "password": "securepassword123",
@@ -97,7 +97,7 @@ class TestSignup:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "dup@example.com",
                         "password": "securepassword123",
@@ -105,7 +105,7 @@ class TestSignup:
                     },
                 )
                 response = await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "dup@example.com",
                         "password": "anotherpassword",
@@ -126,7 +126,7 @@ class TestSignup:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "short@example.com",
                         "password": "1234567",
@@ -147,7 +147,7 @@ class TestSignup:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "not-an-email",
                         "password": "securepassword123",
@@ -173,7 +173,7 @@ class TestLogin:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "login@example.com",
                         "password": "securepassword123",
@@ -181,7 +181,7 @@ class TestLogin:
                     },
                 )
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "login@example.com",
                         "password": "securepassword123",
@@ -204,7 +204,7 @@ class TestLogin:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "wrong@example.com",
                         "password": "securepassword123",
@@ -212,7 +212,7 @@ class TestLogin:
                     },
                 )
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "wrong@example.com",
                         "password": "wrongpassword",
@@ -232,7 +232,7 @@ class TestLogin:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "nonexistent@example.com",
                         "password": "securepassword123",
@@ -319,7 +319,7 @@ class TestProtectedEndpoint:
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get("/analytics/calibration/versions")
+                response = await client.get("/api/v1/analytics/calibration/versions")
                 assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
@@ -334,7 +334,7 @@ class TestProtectedEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": "Bearer invalid-token"},
                 )
                 assert response.status_code == 401
@@ -366,7 +366,7 @@ class TestProtectedEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 assert response.status_code == 401

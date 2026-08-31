@@ -348,7 +348,7 @@ class TestEndToEndLifecycle:
 
         # List versions
         resp = await client.get(
-            "/analytics/calibration/versions",
+            "/api/v1/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -357,7 +357,7 @@ class TestEndToEndLifecycle:
 
         # Get version detail
         resp = await client.get(
-            "/analytics/calibration/versions/cal-list-v1",
+            "/api/v1/analytics/calibration/versions/cal-list-v1",
         )
         assert resp.status_code == 200
         detail = resp.json()
@@ -461,7 +461,7 @@ class TestOwnershipIsolation:
         global _active_user_id
         _active_user_id = USER_A
         resp = await client.get(
-            "/analytics/calibration/versions",
+            "/api/v1/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         vids = [v["version_id"] for v in resp.json()["versions"]]
@@ -471,7 +471,7 @@ class TestOwnershipIsolation:
         # User B lists — only sees cal-scope-b
         _active_user_id = USER_B
         resp = await client.get(
-            "/analytics/calibration/versions",
+            "/api/v1/analytics/calibration/versions",
         )
         assert resp.status_code == 200
         vids = [v["version_id"] for v in resp.json()["versions"]]

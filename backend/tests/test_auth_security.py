@@ -63,7 +63,7 @@ async def _create_tables(engine):
 async def _signup_user(client: AsyncClient, email: str = "test@example.com") -> dict:
     """Sign up a test user and return the response body."""
     resp = await client.post(
-        "/auth/signup",
+        "/api/v1/auth/signup",
         json={
             "email": email,
             "password": "securepassword123",
@@ -152,7 +152,7 @@ class TestLoginRateLimiting:
                 # Make 5 login attempts (the limit)
                 for i in range(5):
                     await client.post(
-                        "/auth/login",
+                        "/api/v1/auth/login",
                         json={
                             "email": "ratelimit@example.com",
                             "password": "wrongpassword" if i < 4 else "securepassword123",
@@ -161,7 +161,7 @@ class TestLoginRateLimiting:
 
                 # 6th attempt should be rate-limited
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "ratelimit@example.com",
                         "password": "securepassword123",
@@ -186,7 +186,7 @@ class TestLoginRateLimiting:
                 await _signup_user(client, "reset@example.com")
                 # First login should work
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "reset@example.com",
                         "password": "securepassword123",
@@ -212,7 +212,7 @@ class TestSignupRateLimiting:
                 # Make 3 signups (the limit)
                 for i in range(3):
                     await client.post(
-                        "/auth/signup",
+                        "/api/v1/auth/signup",
                         json={
                             "email": f"signup{i}@example.com",
                             "password": "securepassword123",
@@ -222,7 +222,7 @@ class TestSignupRateLimiting:
 
                 # 4th attempt should be rate-limited
                 response = await client.post(
-                    "/auth/signup",
+                    "/api/v1/auth/signup",
                     json={
                         "email": "signup3@example.com",
                         "password": "securepassword123",
@@ -251,7 +251,7 @@ class TestTimingHardening:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 start = time.monotonic()
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "nonexistent@example.com",
                         "password": "securepassword123",
@@ -282,7 +282,7 @@ class TestTimingHardening:
 
                 start = time.monotonic()
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "timing@example.com",
                         "password": "wrongpassword",
@@ -309,7 +309,7 @@ class TestTimingHardening:
 
                 # Nonexistent user
                 resp1 = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "nonexistent@example.com",
                         "password": "securepassword123",
@@ -317,7 +317,7 @@ class TestTimingHardening:
                 )
                 # Wrong password
                 resp2 = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "identical@example.com",
                         "password": "wrongpassword",
@@ -348,7 +348,7 @@ class TestRefreshTokenLifecycle:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await _signup_user(client, "refresh@example.com")
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "refresh@example.com",
                         "password": "securepassword123",
@@ -372,7 +372,7 @@ class TestRefreshTokenLifecycle:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await _signup_user(client, "rotate@example.com")
                 login_resp = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "rotate@example.com",
                         "password": "securepassword123",
@@ -383,7 +383,7 @@ class TestRefreshTokenLifecycle:
 
                 # Use the refresh token
                 refresh_resp = await client.post(
-                    "/auth/refresh",
+                    "/api/v1/auth/refresh",
                     cookies={"refresh_token": old_refresh},
                 )
                 assert refresh_resp.status_code == 200
@@ -395,7 +395,7 @@ class TestRefreshTokenLifecycle:
 
                 # Old refresh token should now be invalid
                 old_resp = await client.post(
-                    "/auth/refresh",
+                    "/api/v1/auth/refresh",
                     cookies={"refresh_token": old_refresh},
                 )
                 assert old_resp.status_code == 401
@@ -412,7 +412,7 @@ class TestRefreshTokenLifecycle:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
-                    "/auth/refresh",
+                    "/api/v1/auth/refresh",
                     cookies={"refresh_token": "invalid-token"},
                 )
                 assert response.status_code == 401
@@ -430,7 +430,7 @@ class TestRefreshTokenLifecycle:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await _signup_user(client, "logout@example.com")
                 login_resp = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "logout@example.com",
                         "password": "securepassword123",
@@ -440,14 +440,14 @@ class TestRefreshTokenLifecycle:
 
                 # Logout
                 logout_resp = await client.post(
-                    "/auth/logout",
+                    "/api/v1/auth/logout",
                     cookies={"refresh_token": refresh_token},
                 )
                 assert logout_resp.status_code == 200
 
                 # Refresh token should now be invalid
                 refresh_resp = await client.post(
-                    "/auth/refresh",
+                    "/api/v1/auth/refresh",
                     cookies={"refresh_token": refresh_token},
                 )
                 assert refresh_resp.status_code == 401
@@ -465,7 +465,7 @@ class TestRefreshTokenLifecycle:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await _signup_user(client, "cookie@example.com")
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "cookie@example.com",
                         "password": "securepassword123",
@@ -487,7 +487,7 @@ class TestRefreshTokenLifecycle:
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.post("/auth/refresh")
+                response = await client.post("/api/v1/auth/refresh")
                 assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
@@ -515,7 +515,7 @@ class TestSecurityInvariants:
 
                 # User 1 cannot access user 2's calibration versions
                 response = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": f"Bearer {token1}"},
                 )
                 # Should return 200 with empty list (user 1 has no calibrations)
@@ -548,7 +548,7 @@ class TestSecurityInvariants:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 token = create_access_token(inactive_id)
                 response = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 assert response.status_code == 401
@@ -565,7 +565,7 @@ class TestSecurityInvariants:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": "Bearer invalid-token"},
                 )
                 assert response.status_code == 401
@@ -581,7 +581,7 @@ class TestSecurityInvariants:
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.get("/analytics/calibration/versions")
+                response = await client.get("/api/v1/analytics/calibration/versions")
                 assert response.status_code == 401
         finally:
             app.dependency_overrides.clear()
@@ -597,7 +597,7 @@ class TestSecurityInvariants:
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 await _signup_user(client, "nosecret@example.com")
                 response = await client.post(
-                    "/auth/login",
+                    "/api/v1/auth/login",
                     json={
                         "email": "nosecret@example.com",
                         "password": "securepassword123",
@@ -628,11 +628,11 @@ class TestSecurityInvariants:
 
                 # Both should see empty calibration versions
                 r1 = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": f"Bearer {token1}"},
                 )
                 r2 = await client.get(
-                    "/analytics/calibration/versions",
+                    "/api/v1/analytics/calibration/versions",
                     headers={"Authorization": f"Bearer {token2}"},
                 )
                 assert r1.status_code == 200

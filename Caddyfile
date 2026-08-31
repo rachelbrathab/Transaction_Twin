@@ -9,7 +9,6 @@
 #   - Security headers
 #   - Frontend serving (/)
 #   - Backend API proxy (/api/*)
-#   - Authentication endpoints (/auth/*)
 #
 # Usage:
 #   Development: docker compose up caddy

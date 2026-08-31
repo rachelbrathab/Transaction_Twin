@@ -56,9 +56,8 @@ Internet
   ↓
 Caddy (port 80/443) — TLS termination, security headers
   ├── /           → Frontend (Next.js, port 3000)
-  ├── /api/*      → Backend (FastAPI, port 8000)
-  ├── /auth/*     → Backend (FastAPI, port 8000)
-  └── /health     → Backend (FastAPI, port 8000)
+  ├── /api/*      → Backend (FastAPI, port 8000) — all API routes under /api/v1
+  └── /health     → Backend (FastAPI, port 8000) — liveness check
         ↓
   PostgreSQL (port 5432, internal only)
   Redis (port 6379, internal only)
