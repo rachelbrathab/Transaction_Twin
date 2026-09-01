@@ -94,7 +94,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         secure=settings.is_production,
         samesite="lax",
         max_age=settings.jwt_refresh_token_expire_days * 86400,
-        path="/auth/refresh",
+        path="/api/v1/auth/refresh",
     )
 
 
@@ -105,7 +105,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         httponly=True,
         secure=settings.is_production,
         samesite="lax",
-        path="/auth/refresh",
+        path="/api/v1/auth/refresh",
     )
 
 
