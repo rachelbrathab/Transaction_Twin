@@ -77,11 +77,11 @@ Caddy (port 80/443) — TLS termination, security headers
 
 ### Running Migrations
 
-Migrations run automatically via the migration runner:
+Migrations run via Alembic inside the backend container:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm backend \
-  bash scripts/run_migrations.sh
+  alembic upgrade head
 ```
 
 ### Migration Strategy

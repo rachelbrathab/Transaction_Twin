@@ -34,6 +34,7 @@ COPY --from=deps /opt/venv /opt/venv
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+COPY scripts/ ./scripts/
 
 # Runtime environment — venv is the default Python
 ENV PATH="/opt/venv/bin:$PATH" \
