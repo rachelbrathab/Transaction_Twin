@@ -7,17 +7,16 @@ interface NavItem {
   label: string;
   href: string;
   icon: string;
-  disabled?: boolean;
 }
 
 const navItems: NavItem[] = [
   { label: "Overview", href: "/", icon: "◉" },
+  { label: "Transactions", href: "/transactions", icon: "⚡" },
+  { label: "Agents", href: "/agents", icon: "🤖" },
+  { label: "Policies", href: "/policies", icon: "📋" },
+  { label: "Risk Intelligence", href: "/risk-intelligence", icon: "🛡" },
+  { label: "Audit Vault", href: "/audit-vault", icon: "🔒" },
   { label: "Calibration", href: "/calibration", icon: "📊" },
-  { label: "Transactions", href: "/transactions", icon: "⚡", disabled: true },
-  { label: "Agents", href: "/agents", icon: "🤖", disabled: true },
-  { label: "Policies", href: "/policies", icon: "📋", disabled: true },
-  { label: "Risk Intelligence", href: "/risk", icon: "🛡", disabled: true },
-  { label: "Audit Vault", href: "/audit", icon: "🔒", disabled: true },
 ];
 
 export function Sidebar() {
@@ -36,20 +35,15 @@ export function Sidebar() {
           return (
             <Link
               key={item.href}
-              href={item.disabled ? "#" : item.href}
+              href={item.href}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                item.disabled
-                  ? "text-muted-foreground/50 cursor-not-allowed"
-                  : isActive
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                isActive
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
               <span className="text-base">{item.icon}</span>
               {item.label}
-              {item.disabled && (
-                <span className="ml-auto text-[10px] text-muted-foreground/50 uppercase tracking-wider">Soon</span>
-              )}
             </Link>
           );
         })}
@@ -57,7 +51,7 @@ export function Sidebar() {
 
       <div className="px-6 py-4 border-t border-border">
         <p className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">
-          Sprint 1 — Foundation
+          Transaction Twin v1.0
         </p>
       </div>
     </aside>

@@ -27,6 +27,8 @@ import {
   rollbackCalibration,
   getEffectiveConfig,
   getCalibrationMetrics,
+  getOutcomes,
+  setupTestData,
 } from "@/lib/calibration-api";
 import type {
   VersionResponse,
@@ -34,12 +36,13 @@ import type {
   RecommendationResponse,
   EffectiveConfigResponse,
   CalibrationMetricsResponse,
+  OutcomesResponse,
 } from "@/types/api";
 
-type Tab = "versions" | "recommendations" | "config" | "metrics";
+type Tab = "outcomes" | "versions" | "recommendations" | "config" | "metrics";
 
 export default function CalibrationPage() {
-  const [tab, setTab] = useState<Tab>("versions");
+  const [tab, setTab] = useState<Tab>("outcomes");
   const [versions, setVersions] = useState<VersionResponse[]>([]);
   const [selectedVersion, setSelectedVersion] =
     useState<VersionDetailResponse | null>(null);
@@ -50,11 +53,13 @@ export default function CalibrationPage() {
   const [metrics, setMetrics] = useState<CalibrationMetricsResponse | null>(
     null,
   );
+  const [outcomes, setOutcomes] = useState<OutcomesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activating, setActivating] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [settingUpTestData, setSettingUpTestData] = useState(false);
   const [actionMessage, setActionMessage] = useState<{
     type: "success" | "error";
     text: string;
@@ -69,11 +74,12 @@ export default function CalibrationPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [v, r, c, m] = await Promise.allSettled([
+      const [v, r, c, m, o] = await Promise.allSettled([
         listVersions(),
         getRecommendations(),
         getEffectiveConfig(),
         getCalibrationMetrics(),
+        getOutcomes(),
       ]);
       if (cancelled) return;
       setLoading(false);
@@ -82,6 +88,7 @@ export default function CalibrationPage() {
       if (r.status === "fulfilled") setRecommendations(r.value.recommendations);
       if (c.status === "fulfilled") setConfig(c.value);
       if (m.status === "fulfilled") setMetrics(m.value);
+      if (o.status === "fulfilled") setOutcomes(o.value);
     }
     load();
     return () => { cancelled = true; };
@@ -90,11 +97,12 @@ export default function CalibrationPage() {
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const [v, r, c, m] = await Promise.allSettled([
+    const [v, r, c, m, o] = await Promise.allSettled([
       listVersions(),
       getRecommendations(),
       getEffectiveConfig(),
       getCalibrationMetrics(),
+      getOutcomes(),
     ]);
     setLoading(false);
     if (v.status === "fulfilled") setVersions(v.value.versions);
@@ -102,6 +110,7 @@ export default function CalibrationPage() {
     if (r.status === "fulfilled") setRecommendations(r.value.recommendations);
     if (c.status === "fulfilled") setConfig(c.value);
     if (m.status === "fulfilled") setMetrics(m.value);
+    if (o.status === "fulfilled") setOutcomes(o.value);
   }, []);
 
   const handleViewDetail = useCallback(
@@ -211,7 +220,28 @@ export default function CalibrationPage() {
     }
   }, [reload]);
 
+  const handleSetupTestData = useCallback(async () => {
+    setSettingUpTestData(true);
+    setActionMessage(null);
+    try {
+      const res = await setupTestData();
+      setActionMessage({
+        type: "success",
+        text: `${res.message}. Agent: ${res.agent_id.slice(0, 8)}...`,
+      });
+      await reload();
+    } catch (err) {
+      setActionMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "Failed to create test data",
+      });
+    } finally {
+      setSettingUpTestData(false);
+    }
+  }, [reload]);
+
   const tabs: { key: Tab; label: string }[] = [
+    { key: "outcomes", label: "Outcomes" },
     { key: "versions", label: "Versions" },
     { key: "recommendations", label: "Recommendations" },
     { key: "config", label: "Effective Config" },
@@ -232,14 +262,24 @@ export default function CalibrationPage() {
               runtime configuration
             </p>
           </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            {generating ? "Generating…" : "Generate Calibration"}
-          </Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleSetupTestData}
+              disabled={settingUpTestData}
+            >
+              {settingUpTestData ? "Creating…" : "Create Test Data"}
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              {generating ? "Generating…" : "Generate Calibration"}
+            </Button>
+          </div>
         </div>
 
         {/* Action feedback */}
@@ -321,6 +361,115 @@ export default function CalibrationPage() {
         {/* Content */}
         {!loading && !error && (
           <>
+            {/* ── Outcomes Tab ── */}
+            {tab === "outcomes" && (
+              <div className="space-y-4">
+                {!outcomes || outcomes.total_samples === 0 ? (
+                  <EmptyState
+                    icon="📊"
+                    title="No calibration outcomes"
+                    description="No verified transaction outcomes available for calibration analysis. Use 'Create Test Data' to generate sample transactions with verified outcomes, or run real transactions through the decision endpoint and submit outcomes."
+                  />
+                ) : (
+                  <div className="space-y-4">
+                    {/* Summary card */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Outcomes Summary</CardTitle>
+                        <CardDescription>
+                          Window: {outcomes.window_days} days · Computed:{" "}
+                          {outcomes.computed_at
+                            ? new Date(outcomes.computed_at).toLocaleString()
+                            : "—"}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <p className="text-muted-foreground text-xs">Total Samples</p>
+                            <p className="text-2xl font-bold mt-0.5">{outcomes.total_samples}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground text-xs">Eligible</p>
+                            <p className="text-2xl font-bold mt-0.5 text-success">{outcomes.eligible_samples}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground text-xs">Excluded</p>
+                            <p className="text-2xl font-bold mt-0.5 text-destructive">{outcomes.excluded_samples}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground text-xs">Data Sufficiency</p>
+                            <Badge variant={outcomes.data_sufficiency?.level === "high" || outcomes.data_sufficiency?.level === "moderate" ? "success" : "default"}>
+                              {String(outcomes.data_sufficiency?.level ?? "unknown")}
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Exclusion summary */}
+                    {Object.keys(outcomes.exclusion_summary ?? {}).length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Exclusion Reasons</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {Object.entries(outcomes.exclusion_summary ?? {}).map(
+                              ([reason, count]) => (
+                                <div
+                                  key={reason}
+                                  className="flex items-center justify-between text-sm"
+                                >
+                                  <span className="capitalize">{reason.replace(/_/g, " ")}</span>
+                                  <span className="font-medium">{count}</span>
+                                </div>
+                              ),
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Samples list */}
+                    {outcomes.samples.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Recent Samples</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2 max-h-96 overflow-y-auto">
+                            {outcomes.samples.slice(0, 50).map((sample) => (
+                              <div
+                                key={sample.transaction_id}
+                                className="flex items-center gap-3 text-sm py-1 border-b border-border/50 last:border-0"
+                              >
+                                <Badge variant={sample.sample_eligible ? "success" : "destructive"} className="text-xs">
+                                  {sample.sample_eligible ? "eligible" : "excluded"}
+                                </Badge>
+                                <span className="font-mono text-xs text-muted-foreground truncate max-w-[120px]">
+                                  {sample.transaction_id.slice(0, 8)}
+                                </span>
+                                <span className="text-xs">
+                                  {sample.original_decision || "—"}
+                                </span>
+                                <span className="text-xs">
+                                  {sample.feedback_type}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {sample.exclusion_reason ?? ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── Versions Tab ── */}
             {tab === "versions" && (
               <div className="space-y-4">

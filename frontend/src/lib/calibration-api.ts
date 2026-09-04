@@ -18,6 +18,8 @@ import type {
   RollbackResponse,
   EffectiveConfigResponse,
   CalibrationMetricsResponse,
+  SimulateOutcomeResponse,
+  OutcomesResponse,
 } from "@/types/api";
 
 const BASE = "/analytics/calibration";
@@ -101,4 +103,43 @@ export async function getEffectiveConfig(): Promise<EffectiveConfigResponse> {
 
 export async function getCalibrationMetrics(): Promise<CalibrationMetricsResponse> {
   return apiGet<CalibrationMetricsResponse>(`${BASE}/metrics`);
+}
+
+// ── Simulate Outcome ───────────────────────────────────────
+
+export async function simulateOutcome(
+  transactionId: string,
+  eventType: string,
+): Promise<SimulateOutcomeResponse> {
+  return apiPost<SimulateOutcomeResponse>(
+    `/transactions/${transactionId}/simulate-outcome`,
+    { event_type: eventType },
+  );
+}
+
+// ── Test Data Setup ────────────────────────────────────────
+
+export async function setupTestData(): Promise<SetupTestDataResponse> {
+  return apiPost<SetupTestDataResponse>(`/calibration/test-data`);
+}
+
+export async function getOutcomes(
+  windowDays: number = 30,
+): Promise<OutcomesResponse> {
+  return apiGet<OutcomesResponse>(
+    `${BASE}/outcomes?window_days=${windowDays}`,
+  );
+}
+
+interface SetupTestDataResponse {
+  agent_id: string;
+  intent_id: string;
+  transactions: Array<{
+    transaction_id: string;
+    decision: string;
+    outcome: string;
+    final_status: string;
+    amount: number;
+  }>;
+  message: string;
 }

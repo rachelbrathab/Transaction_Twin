@@ -4,7 +4,7 @@ services:
     container_name: transaction-twin-db
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       POSTGRES_USER: transaction_twin
       POSTGRES_PASSWORD: transaction_twin

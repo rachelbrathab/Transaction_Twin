@@ -11,10 +11,11 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const API_V1_PREFIX = "/api/v1";
 
 interface ApiError {
-  error: {
+  error?: {
     code: string;
     message: string;
   };
+  detail?: string | Array<{ msg?: string; message?: string; type?: string; loc?: (string | number)[] }>;
 }
 
 interface RequestOptions extends Omit<RequestInit, "body" | "method"> {
@@ -133,6 +134,19 @@ export async function apiPost<T>(path: string, body?: unknown, options?: Request
   });
 }
 
+export async function apiPut<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+  return apiRequest<T>(path, {
+    ...options,
+    method: "PUT",
+    body: body ? JSON.stringify(body) : undefined,
+    headers: { "Content-Type": "application/json", ...options?.headers },
+  });
+}
+
+export async function apiDelete<T>(path: string, options?: RequestOptions): Promise<T> {
+  return apiRequest<T>(path, { ...options, method: "DELETE" });
+}
+
 async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   return _apiRequestWithRetry<T>(path, options, false);
 }
@@ -180,15 +194,32 @@ async function _apiRequestWithRetry<T>(
   }
 
   if (!response.ok) {
-    let errorBody: ApiError;
+    let code = "UNKNOWN_ERROR";
+    let message = "An error occurred";
     try {
-      errorBody = await response.json();
+      const errorBody: ApiError = await response.json();
+      // Handle our custom error format: { error: { code, message } }
+      if (errorBody.error?.code && errorBody.error?.message) {
+        code = errorBody.error.code;
+        message = errorBody.error.message;
+      }
+      // Handle FastAPI HTTPException format: { detail: "..." }
+      else if (typeof errorBody.detail === "string") {
+        code = response.status === 409 ? "CONFLICT" : response.status === 429 ? "RATE_LIMIT" : `HTTP_${response.status}`;
+        message = errorBody.detail;
+      }
+      // Handle FastAPI validation error format: { detail: [...] }
+      else if (Array.isArray(errorBody.detail) && errorBody.detail.length > 0) {
+        code = "VALIDATION_ERROR";
+        message = errorBody.detail
+          .map((e) => e.msg || e.message || String(e))
+          .join("; ");
+      }
     } catch {
-      errorBody = {
-        error: { code: "NETWORK_ERROR", message: "Failed to reach the server" },
-      };
+      code = "NETWORK_ERROR";
+      message = "Failed to reach the server";
     }
-    throw new ApiRequestError(errorBody.error.code, errorBody.error.message, response.status);
+    throw new ApiRequestError(code, message, response.status);
   }
 
   return response.json() as Promise<T>;

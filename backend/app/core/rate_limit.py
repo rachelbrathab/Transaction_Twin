@@ -109,7 +109,7 @@ class RedisRateLimiter:
         redis_client = await self._get_redis()
         if redis_client is None:
             # Fallback to in-memory
-            self._fallback.check(key, limit, window_seconds)
+            await self._fallback.check(key, limit, window_seconds)
             return
 
         try:
@@ -143,7 +143,7 @@ class RedisRateLimiter:
         except Exception:
             # Redis error — fall back to in-memory
             logger.warning("rate_limiter_redis_error_fallback_in_memory")
-            self._fallback.check(key, limit, window_seconds)
+            await self._fallback.check(key, limit, window_seconds)
 
 
 # ── Singleton ──────────────────────────────────────────────────────

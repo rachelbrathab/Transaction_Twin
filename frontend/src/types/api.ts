@@ -130,6 +130,49 @@ export interface CalibrationMetricsResponse {
   risk_level_distribution: Record<string, number>;
 }
 
+// ── Simulate Outcome Types ─────────────────────────────────
+
+export interface SimulateEventResult {
+  event_id: string;
+  event_type: string;
+  sequence_number: number;
+  verification_state: string;
+}
+
+export interface SimulateOutcomeResponse {
+  transaction_id: string;
+  final_status: string;
+  events_created: SimulateEventResult[];
+  target_event: string;
+}
+
+// ── Calibration Outcomes Types ─────────────────────────────
+
+export interface OutcomesSample {
+  transaction_id: string;
+  decision_id: string;
+  original_decision: string;
+  final_lifecycle_status: string;
+  feedback_type: string;
+  feedback_confidence: number;
+  verification_state: string;
+  risk_level: string | null;
+  risk_available: boolean;
+  sample_eligible: boolean;
+  exclusion_reason: string | null;
+}
+
+export interface OutcomesResponse {
+  samples: OutcomesSample[];
+  total_samples: number;
+  eligible_samples: number;
+  excluded_samples: number;
+  exclusion_summary: Record<string, number>;
+  data_sufficiency: Record<string, unknown>;
+  window_days: number;
+  computed_at: string;
+}
+
 export type CalibrationVersionStatus =
   | "generated"
   | "active"
@@ -140,3 +183,78 @@ export type RecommendationStatus =
   | "reviewed"
   | "approved"
   | "rejected";
+
+// ── Agent Types ────────────────────────────────────────────────
+
+export interface AgentRead {
+  id: string;
+  user_id: string;
+  external_reference: string | null;
+  name: string;
+  description: string | null;
+  status: string;
+  trust_score: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentCreate {
+  name: string;
+  description?: string | null;
+  external_reference?: string | null;
+}
+
+export interface AgentUpdate {
+  name?: string | null;
+  description?: string | null;
+  external_reference?: string | null;
+  status?: string | null;
+}
+
+export interface AgentListResponse {
+  agents: AgentRead[];
+  total: number;
+}
+
+// ── Transaction Types ───────────────────────────────────────
+
+export interface TransactionListItem {
+  id: string;
+  agent_id: string;
+  transaction_type: string;
+  amount: number;
+  currency: string;
+  status: string;
+  decision: string | null;
+  decision_reason: string | null;
+  risk_level: string | null;
+  risk_score: number | null;
+  created_at: string;
+}
+
+export interface TransactionListResponse {
+  transactions: TransactionListItem[];
+  total: number;
+}
+
+export interface TransactionDetailResponse {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  intent_id: string;
+  transaction_type: string;
+  amount: number;
+  currency: string;
+  status: string;
+  decision: string | null;
+  decision_reason: string | null;
+  decision_explanation: Record<string, unknown> | null;
+  risk_level: string | null;
+  risk_score: number | null;
+  risk_features: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  events: Array<Record<string, unknown>>;
+}
+
