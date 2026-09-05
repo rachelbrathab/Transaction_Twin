@@ -34,6 +34,7 @@ class AgentUpdate(BaseModel):
     description: str | None = None
     external_reference: str | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive|suspended)$")
+    trust_score: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 class AgentRead(BaseModel):

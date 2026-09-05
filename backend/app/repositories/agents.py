@@ -70,6 +70,7 @@ class AgentRepository:
         description: str | None = None,
         external_reference: str | None = None,
         status: str | None = None,
+        trust_score: float | None = None,
     ) -> Agent:
         """Update agent fields. Only non-None values are applied."""
         if name is not None:
@@ -80,5 +81,7 @@ class AgentRepository:
             agent.external_reference = external_reference
         if status is not None:
             agent.status = status
+        if trust_score is not None:
+            agent.trust_score = trust_score
         await self.db.flush()
         return agent

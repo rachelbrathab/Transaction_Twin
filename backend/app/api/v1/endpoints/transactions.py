@@ -22,6 +22,7 @@ from app.models.audit_event import AuditEvent
 from app.models.decision import Decision
 from app.models.intent import Intent
 from app.models.policy import Policy
+from app.models.risk_assessment import RiskAssessment
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.decision_engine import (
@@ -1068,6 +1069,12 @@ async def _decide_transaction_impl(
 
     explanation_data = {
         **decision_result.explanation,
+        "risk": {
+            "level": risk_result.risk_level.value,
+            "score": risk_result.overall_score,
+            "confidence": risk_result.confidence,
+            "summary": risk_result.summary,
+        },
         "policy_ids": [pr["policy_id"] for pr in policy_results_for_signals],
         "policy_versions": {
             pr["policy_id"]: pr["policy_version"]
@@ -1103,9 +1110,32 @@ async def _decide_transaction_impl(
     db.add(db_transaction)
     await db.flush()
 
+    # 13.5a. Persist RiskAssessment linked to transaction
+    db_risk_assessment = RiskAssessment(
+        transaction_id=db_transaction.id,
+        overall_score=risk_result.overall_score,
+        intent_match_score=risk_result.component_scores.intent_match,
+        behavioral_risk=risk_result.component_scores.agent_trust,
+        agent_trust_score=agent_trust_score,
+        policy_risk=risk_result.component_scores.policy_risk,
+        velocity_risk=risk_result.component_scores.velocity_risk,
+        merchant_risk=risk_result.component_scores.merchant_risk,
+        model_version=risk_result.risk_model_version,
+        features={
+            "risk_level": risk_result.risk_level.value,
+            "confidence": risk_result.confidence,
+            "signal_count": risk_result.signal_count,
+            "summary": risk_result.summary,
+            "evaluation_id": risk_result.evaluation_id,
+            "component_scores": risk_result.component_scores.model_dump(),
+        },
+    )
+    db.add(db_risk_assessment)
+    await db.flush()
+
     db_decision = Decision(
         transaction_id=db_transaction.id,
-        risk_assessment_id=None,
+        risk_assessment_id=db_risk_assessment.id,
         policy_id=most_severe_policy_id,
         decision=decision_result.decision.value,
         reason=decision_result.reason,
@@ -1157,8 +1187,8 @@ async def _decide_transaction_impl(
         entity_type="decision",
         entity_id=db_decision.id,
         event_type="decision_created",
-        actor_type="system",
-        actor_id=None,
+        actor_type="user",
+        actor_id=user_uuid,
         metadata_={
             "decision": decision_result.decision.value,
             "evaluation_id": decision_result.evaluation_id,

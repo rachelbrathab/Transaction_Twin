@@ -179,7 +179,11 @@ async function _apiRequestWithRetry<T>(
   });
 
   // Handle 401 — try refresh token flow (once)
-  if (response.status === 401 && !isRetry && path !== "/auth/refresh") {
+  // Do NOT intercept 401s from auth endpoints (login/signup/refresh) —
+  // those are genuine credential errors and the backend message
+  // (e.g. "Invalid email or password") must reach the error handler below.
+  const isAuthEndpoint = path.startsWith("/auth/");
+  if (response.status === 401 && !isRetry && !isAuthEndpoint) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
       // Retry the original request with the new access token
